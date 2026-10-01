@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Copy, Settings, Volume2, VolumeX } from 'lucide-react';
 import { Game, type GameConfig, type Remote } from './components/Game';
 import { Table, type ViewMode } from './components/Table';
-import { HandSVG } from './components/Hand';
+import { Learn } from './components/Learn';
 import { Avatar, Chips, Modal, Seg, Switch, usePref } from './components/ui';
 import { BOTS, botMove, type Bot as BotT } from './game/bots';
 import { applyMove, DEFAULT_RULES, initialState, MODES, modeOf, other, winner, type Move, type Rules, type Side, type State } from './game/rules';
@@ -436,54 +436,6 @@ function DemoTable({ view, skin }: { view: ViewMode; skin: string }) {
       onView={() => {}}
       onMove={() => {}}
     />
-  );
-}
-
-function Learn({ skin, onPlay }: { skin: string; onPlay: () => void }) {
-  const H = ({ n, m }: { n: number; m?: boolean }) => (
-    <span className="learn-hand">
-      <HandSVG count={n} mirror={!!m} skin={skin} />
-    </span>
-  );
-  const steps = [
-    { art: <><H n={1} /><H n={1} m /></>, title: 'Start', text: 'One finger up on each hand.' },
-    { art: <><H n={2} /><span className="arrow">→</span><H n={3} m /></>, title: 'Tap', text: 'Add your fingers to any of their hands.' },
-    { art: <H n={0} />, title: 'Knock out', text: 'Reach 5 and that hand is out. Take both to win.' },
-    { art: <><H n={1} /><H n={3} m /><span className="arrow">→</span><H n={2} /><H n={2} m /></>, title: 'Split', text: 'Or move fingers between your own hands.' },
-  ];
-  return (
-    <div className="learn screen">
-      <h1>How to play</h1>
-      <div className="learn-grid">
-        {steps.map((s, i) => (
-          <div className="learn-card" key={s.title}>
-            <div className="learn-art">{s.art}</div>
-            <h3>
-              <span className="learn-step">{i + 1}</span>
-              {s.title}
-            </h3>
-            <p>{s.text}</p>
-          </div>
-        ))}
-      </div>
-      <h2>Two rule sets</h2>
-      <div className="rules-compare">
-        {(['classic', 'street'] as const).map((id) => (
-          <div key={id} className="rule-card">
-            <h3>{MODES[id].name}</h3>
-            <ul>
-              {MODES[id].points.map((p) => (
-                <li key={p}>{p}</li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
-      <p className="learn-note">Drag one hand onto another to tap. Press S to split, then use the arrow keys.</p>
-      <button className="btn primary" onClick={onPlay}>
-        Play now
-      </button>
-    </div>
   );
 }
 

@@ -472,3 +472,35 @@ p { margin: 0; }
 .text.big:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
 .welcome-skins { justify-content: center; margin: 6px 0 10px; }
 .welcome-note { text-align: center; color: var(--faint); font-size: 13px; }
+
+/* ---------- how to play ---------- */
+.learn2 { max-width: 1040px; display: flex; flex-direction: column; gap: 28px; }
+.tour { display: grid; grid-template-columns: minmax(0, 460px) 1fr; gap: 48px; align-items: center; }
+.tour-board .table { width: 100%; }
+.tour-copy { display: flex; flex-direction: column; gap: 14px; max-width: 420px; }
+.tour-count { font-family: 'Geist Mono', monospace; color: var(--faint); font-size: 14px; }
+.tour-copy h1 { font-size: 40px; font-weight: 800; letter-spacing: -0.035em; animation: enter 0.45s var(--smooth); }
+.tour-copy p { color: var(--muted); font-size: 18px; line-height: 1.5; animation: enter 0.45s var(--smooth) 60ms both; min-height: 82px; }
+.tour-nav { display: flex; align-items: center; gap: 16px; margin-top: 12px; }
+.round.ghosty { background: var(--surface-2); }
+.round.next { background: var(--text); color: #111; }
+.round.next:hover { background: #fff; }
+.tour-nav .btn { height: 40px; border-radius: 99px; }
+.tour-dots { display: flex; gap: 6px; }
+.tour-dots button { width: 8px; height: 8px; border-radius: 99px; background: var(--surface-3); transition: width 0.35s var(--smooth), background 0.3s; }
+.tour-dots button.on { width: 24px; background: var(--accent); }
+.learn-more { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.lm-card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; }
+.lm-card h3 { font-size: 16px; color: var(--muted); font-weight: 600; }
+.lm-row { display: flex; flex-direction: column; gap: 2px; }
+.lm-row b { font-weight: 600; }
+.lm-row span { color: var(--muted); }
+.lm-row.icon { flex-direction: row; align-items: flex-start; gap: 12px; }
+.lm-row.icon svg { flex: none; margin-top: 2px; color: var(--accent-hi); }
+kbd { font-family: 'Geist Mono', monospace; font-size: 12px; padding: 1px 6px; border-radius: 6px; background: var(--surface-3); color: var(--text); }
+@media (max-width: 900px) {
+  .tour { grid-template-columns: 1fr; gap: 24px; }
+  .tour-board { max-width: 420px; width: 100%; margin: 0 auto; }
+  .tour-copy h1 { font-size: 32px; }
+  .learn-more { grid-template-columns: 1fr; }
+}
