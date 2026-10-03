@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Copy, Settings, Volume2, VolumeX } from 'lucide-react';
+import { Check, Copy, Minus, Plus, Settings, Volume2, VolumeX } from 'lucide-react';
 import { Game, type GameConfig, type Remote } from './components/Game';
 import { Table, type ViewMode } from './components/Table';
 import { Learn } from './components/Learn';
-import { Avatar, Chips, Modal, Seg, Switch, usePref } from './components/ui';
+import { Avatar, Chips, clockLabel, Modal, Seg, Switch, usePref } from './components/ui';
 import { BOTS, botMove, type Bot as BotT } from './game/bots';
 import { applyMove, DEFAULT_RULES, initialState, MODES, modeOf, other, winner, type Move, type Rules, type Side, type State } from './game/rules';
 import { loadProfile, saveProfile, SKINS, type Profile } from './game/profile';
@@ -19,6 +19,8 @@ const CLOCKS = [
   { value: 60, label: '1m' },
   { value: 180, label: '3m' },
 ];
+const PRESETS = CLOCKS.map((c) => c.value);
+const CLOCK_STEPS = [15, 30, 45, 60, 90, 120, 180, 300, 420, 600, 900, 1200, 1800];
 
 export default function App() {
   const [profile, setProfileState] = useState<Profile>(loadProfile);
@@ -34,6 +36,7 @@ export default function App() {
   const [muted, setMute] = useState(isMuted());
   const [sheet, setSheet] = useState<null | 'settings'>(null);
   const [customOpen, setCustomOpen] = useState(false);
+  const [customClock, setCustomClock] = useState(false);
   const [view, setView] = usePref<ViewMode>('chopstix.view', '2d');
 
   const start = (c: GameConfig) => {
@@ -164,6 +167,7 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const mode = modeOf(rules);
   const hosting = opp === 'friend' && net.role === 'host';
+  const stepIdx = Math.max(0, CLOCK_STEPS.findIndex((c) => c >= clock));
 
   if (!profile.onboarded)
     return (
@@ -294,7 +298,34 @@ export default function App() {
                         <Switch label="Tap your own hand" on={rules.selfTap} onChange={(v) => setRules({ ...rules, selfTap: v })} />
                       </div>
                     )}
-                    <Chips label="Clock" value={clock} onChange={setClock} options={CLOCKS} />
+                    <Chips
+                      label="Clock"
+                      value={customClock ? -1 : clock}
+                      onChange={(v) => {
+                        if (v === -1) {
+                          setCustomClock(true);
+                          if (PRESETS.includes(clock)) setClock(300);
+                        } else (setCustomClock(false), setClock(v));
+                      }}
+                      options={[
+                        ...CLOCKS,
+                        { value: -1, title: 'Custom time', label: customClock ? clockLabel(clock) : <Plus size={16} aria-label="Custom time" /> },
+                      ]}
+                    />
+                    {customClock && (
+                      <div className="stepper" role="group" aria-label="Custom time per player">
+                        <button className="round" onClick={() => setClock(CLOCK_STEPS[Math.max(0, stepIdx - 1)])} disabled={stepIdx === 0} aria-label="Less time">
+                          <Minus size={16} />
+                        </button>
+                        <div className="stepper-value">
+                          <b>{clockLabel(clock)}</b>
+                          <span>per player</span>
+                        </div>
+                        <button className="round" onClick={() => setClock(CLOCK_STEPS[Math.min(CLOCK_STEPS.length - 1, stepIdx + 1)])} disabled={stepIdx === CLOCK_STEPS.length - 1} aria-label="More time">
+                          <Plus size={16} />
+                        </button>
+                      </div>
+                    )}
                     {opp !== 'local' && (
                       <Chips
                         label="First"

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUpDown, BarChart3, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Crown, Flag, Lightbulb, Pause, Play, Plus, RotateCcw, X } from 'lucide-react';
 import { Table, type ViewMode } from './Table';
-import { Avatar, Modal } from './ui';
+import { Avatar, clockLabel, Modal } from './ui';
 import { applyMove, describeRules, initialState, legalMoves, other, positionKey, winner, type Move, type Rules, type Side, type State } from '../game/rules';
 import { evalBar, rankedMoves } from '../game/solver';
 import { botMove, type Bot } from '../game/bots';
@@ -354,7 +354,7 @@ export function Game({
 
   const meWon = result && result.winner !== null && (mode === 'local' || result.winner === config.mySide);
   const title = !result ? '' : result.winner === null ? 'Draw' : mode === 'local' ? `${names[result.winner]} wins` : meWon ? 'You won' : 'You lost';
-  const timeLabel = config.clock ? (config.clock >= 60 ? `${config.clock / 60} min` : `${config.clock}s`) : null;
+  const timeLabel = config.clock ? clockLabel(config.clock) : null;
   const status = result ? null : canAct ? (mode === 'local' ? `${names[live.turn]} to move` : 'Your move') : mode === 'bot' ? `${bot!.name} is thinking…` : `${names[live.turn]} to move`;
   const mins = Math.floor(duration / 60000);
   const secs = Math.round((duration % 60000) / 1000);

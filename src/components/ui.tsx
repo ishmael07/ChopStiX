@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 
 export function Avatar({ name, color, size = 40 }: { name: string; color: string; size?: number }) {
@@ -80,7 +80,7 @@ export function usePref<T extends string>(key: string, fallback: T): [T, (v: T) 
   return [v, set];
 }
 
-/** A labeled row of equal-width options with a sliding highlight. */
+/** A labeled row of options sized to their text, with a sliding highlight. */
 export function Chips<T extends string | number>({
   label,
   value,
@@ -89,21 +89,39 @@ export function Chips<T extends string | number>({
 }: {
   label: string;
   value: T;
-  options: { value: T; label: ReactNode }[];
+  options: { value: T; label: ReactNode; title?: string }[];
   onChange: (v: T) => void;
 }) {
-  const i = Math.max(0, options.findIndex((o) => o.value === value));
+  const set = useRef<HTMLDivElement>(null);
+  const [thumb, setThumb] = useState<{ x: number; w: number } | null>(null);
+  const i = options.findIndex((o) => o.value === value);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = set.current?.querySelectorAll<HTMLButtonElement>('.pill')[i];
+      setThumb(el ? { x: el.offsetLeft, w: el.offsetWidth } : null);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (set.current) ro.observe(set.current);
+    return () => ro.disconnect();
+  }, [i, options.length, value]);
   return (
     <div className="chips-row" role="radiogroup" aria-label={label}>
       <span className="chips-label">{label}</span>
-      <div className="chips-set" style={{ ['--n' as string]: options.length, ['--i' as string]: i }}>
-        <span className="chips-thumb" />
+      <div className="chips-set" ref={set}>
+        {thumb && <span className="chips-thumb" style={{ transform: `translateX(${thumb.x}px)`, width: thumb.w }} />}
         {options.map((o) => (
-          <button key={String(o.value)} role="radio" aria-checked={o.value === value} className={`pill ${o.value === value ? 'on' : ''}`} onClick={() => onChange(o.value)}>
+          <button key={String(o.value)} role="radio" title={o.title} aria-checked={o.value === value} className={`pill ${o.value === value ? 'on' : ''}`} onClick={() => onChange(o.value)}>
             {o.label}
           </button>
         ))}
       </div>
     </div>
   );
+}
+
+/** 45 -> "45s", 300 -> "5m", 90 -> "1m 30s" */
+export function clockLabel(sec: number) {
+  if (sec < 60) return `${sec}s`;
+  return sec % 60 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${sec / 60}m`;
 }
