@@ -640,3 +640,29 @@ kbd { font-family: 'Geist Mono', monospace; font-size: 12px; padding: 1px 6px; b
 .facts dt { font-weight: 600; }
 .facts dd { margin: 0; color: var(--muted); line-height: 1.55; }
 @media (max-width: 700px) { .facts dl > div { grid-template-columns: 1fr; gap: 4px; } }
+
+/* ---------- game side panel: slim, aligned to the table ---------- */
+.game { grid-template-columns: minmax(0, auto) 290px; gap: 20px; align-items: stretch; }
+.panel { position: static; margin: 56px 0; min-height: 0; max-height: none; border-radius: 18px; background: var(--surface); }
+.panel-top { display: flex; align-items: center; gap: 6px; padding: 12px 10px 4px 14px; }
+.panel-top .icon-btn { margin-left: auto; }
+.icon-btn.sm { width: 32px; height: 32px; border-radius: 9px; }
+.status { margin: 6px 16px 10px; justify-content: space-between; }
+.status-move { color: var(--faint); font-weight: 500; font-family: 'Geist Mono', monospace; font-size: 13px; }
+.movelist { border-top: 1px solid var(--line); padding: 6px 8px; }
+.movelist .empty { padding: 14px 8px; color: var(--faint); font-size: 14px; }
+.mv-row { grid-template-columns: 28px 1fr 1fr; }
+.mv { padding: 5px 8px; font-size: 14px; }
+.nav-row { padding: 8px; gap: 4px; }
+.nav-row button { height: 32px; background: none; border-radius: 8px; }
+.nav-row button:hover { background: var(--surface-2); }
+.actions { grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 0 8px 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+.tool { flex-direction: row; justify-content: center; padding: 0; height: 38px; border-radius: 10px; }
+.post { padding: 0 12px 10px; }
+.post-banner { padding: 12px 14px; }
+.post-banner b { font-size: 16px; }
+.end-actions { gap: 6px; }
+.end-actions .btn { height: 40px; font-size: 14px; padding: 0 10px; }
+@media (max-width: 1040px) { .game { grid-template-columns: 1fr; } .panel { margin: 0; } }
+.status { justify-content: flex-start; }
+.status-move { margin-left: auto; }

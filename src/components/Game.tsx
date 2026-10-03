@@ -438,20 +438,20 @@ export function Game({
       </div>
 
       <aside className="panel">
-        <div className="panel-head">
-          <div>
-            <div className="panel-title">{mode === 'bot' ? `vs ${bot!.name}` : mode === 'local' ? 'Local game' : `vs ${remote!.oppName}`}</div>
-            <div className="chips">
-              <span className="chip">{describeRules(rules)}</span>
-              {timeLabel && <span className="chip">{timeLabel}</span>}
-            </div>
-          </div>
-          <button className="icon-btn" onClick={onExit} title="Leave game" aria-label="Leave game">
-            <X size={18} />
+        <div className="panel-top">
+          <span className="chip">{describeRules(rules)}</span>
+          {timeLabel && <span className="chip">{timeLabel}</span>}
+          <button className="icon-btn sm" onClick={onExit} title="Leave game" aria-label="Leave game">
+            <X size={16} />
           </button>
         </div>
 
-        {!revealed && status && <div className={`status ${canAct ? 'go' : ''}`}>{status}</div>}
+        {!revealed && status && (
+          <div className={`status ${canAct ? 'go' : ''}`}>
+            {status}
+            {moves.length > 0 && <span className="status-move">Move {Math.floor(moves.length / 2) + 1}</span>}
+          </div>
+        )}
 
         {revealed && result && (
           <div className="post">
@@ -487,17 +487,8 @@ export function Game({
           </div>
         )}
 
-        <div className="moves-head">
-          <span />
-          {([0, 1] as Side[]).map((sd) => (
-            <span key={sd}>
-              <i className="dot" style={{ background: colorOf(sd) }} />
-              {names[sd]}
-            </span>
-          ))}
-        </div>
         <div className="movelist" ref={listRef}>
-          {rows.length === 0 && <div className="empty">Pick one of your hands, then tap a hand to add your fingers to it.</div>}
+          {rows.length === 0 && <div className="empty">Moves will appear here.</div>}
           {rows.map((i) => (
             <div className="mv-row" key={i}>
               <span className="mv-num">{i / 2 + 1}</span>
@@ -531,22 +522,18 @@ export function Game({
           {!revealed ? (
             <>
               {mode !== 'online' && (
-                <button className="tool" disabled={!canAct} onClick={() => setHint(rankedMoves(rules, live)[0].move)}>
+                <button className="tool" title="Hint" aria-label="Hint" disabled={!canAct} onClick={() => setHint(rankedMoves(rules, live)[0].move)}>
                   <Lightbulb size={18} />
-                  <span>Hint</span>
                 </button>
               )}
-              <button className="tool" onClick={() => setFlipped((f) => !f)}>
+              <button className="tool" title="Switch seat" aria-label="Switch seat" onClick={() => setFlipped((f) => !f)}>
                 <ArrowUpDown size={18} />
-                <span>Switch seat</span>
               </button>
-              <button className={`tool ${showEval ? 'on' : ''}`} onClick={() => setShowEval((s) => !s)}>
+              <button className={`tool ${showEval ? 'on' : ''}`} title="Evaluation bar" aria-label="Evaluation bar" onClick={() => setShowEval((s) => !s)}>
                 <BarChart3 size={18} />
-                <span>Eval</span>
               </button>
-              <button className="tool danger" onClick={resign} disabled={!!result}>
+              <button className="tool danger" title="Resign" aria-label="Resign" onClick={resign} disabled={!!result}>
                 <Flag size={18} />
-                <span>Resign</span>
               </button>
             </>
           ) : (
