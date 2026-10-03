@@ -78,6 +78,26 @@ export function Game({
   const [delta, setDelta] = useState<number | null>(null);
   const [rematchAsked, setRematchAsked] = useState({ me: false, them: false });
   const [flipped, setFlipped] = useState(false);
+  // Focus mode: board fills the screen (native fullscreen where supported).
+  const [focus, setFocus] = useState(false);
+  const toggleFocus = () => {
+    const next = !focus;
+    setFocus(next);
+    try {
+      if (next && !document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
+      if (!next && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    } catch {
+      /* fullscreen not available: the CSS layout still enlarges the board */
+    }
+  };
+  useEffect(() => {
+    const onFs = () => !document.fullscreenElement && setFocus(false);
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setFocus(false);
+    document.addEventListener('fullscreenchange', onFs);
+    window.addEventListener('keydown', onKey);
+    return () => (document.removeEventListener('fullscreenchange', onFs), window.removeEventListener('keydown', onKey));
+  }, []);
+  useEffect(() => () => void (document.fullscreenElement && document.exitFullscreen?.().catch(() => {})), []);
   const [boardView, setViewState] = useState<ViewMode>(() => {
     try {
       return localStorage.getItem('chopstix.view') === '3d' ? '3d' : '2d';
@@ -340,7 +360,7 @@ export function Game({
   const secs = Math.round((duration % 60000) / 1000);
 
   return (
-    <div className="game screen">
+    <div className={`game screen ${focus ? 'focus' : ''}`}>
       <div className="board-col">
         {playerBar(other(bottom))}
         <div className="board-wrap">
@@ -362,6 +382,8 @@ export function Game({
             onView={setView3}
             hint={atLive ? hint : null}
             onMove={(m) => play(m)}
+            focus={focus}
+            onFocus={toggleFocus}
           />
         </div>
         {playerBar(bottom)}

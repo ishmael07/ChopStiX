@@ -80,7 +80,7 @@ export function usePref<T extends string>(key: string, fallback: T): [T, (v: T) 
   return [v, set];
 }
 
-/** A labeled row of one-tap pill buttons. */
+/** A labeled row of equal-width options with a sliding highlight. */
 export function Chips<T extends string | number>({
   label,
   value,
@@ -92,10 +92,12 @@ export function Chips<T extends string | number>({
   options: { value: T; label: ReactNode }[];
   onChange: (v: T) => void;
 }) {
+  const i = Math.max(0, options.findIndex((o) => o.value === value));
   return (
     <div className="chips-row" role="radiogroup" aria-label={label}>
       <span className="chips-label">{label}</span>
-      <div className="chips-set">
+      <div className="chips-set" style={{ ['--n' as string]: options.length, ['--i' as string]: i }}>
+        <span className="chips-thumb" />
         {options.map((o) => (
           <button key={String(o.value)} role="radio" aria-checked={o.value === value} className={`pill ${o.value === value ? 'on' : ''}`} onClick={() => onChange(o.value)}>
             {o.label}

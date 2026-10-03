@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, Video, X, ArrowLeftRight } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Maximize2, Minimize2, Video, X, ArrowLeftRight } from 'lucide-react';
 import { HandImage } from './Hand';
-import { Seg } from './ui';
 import { legalMoves, other, splitOptions, type Hands, type Move, type Rules, type Side, type State } from '../game/rules';
 import type { CameraMode, HandFlags, HandKey, Motion, Scene3D } from '../three/scene3d';
 import { sfx } from '../sound';
@@ -25,6 +24,8 @@ interface Props {
   onView: (v: ViewMode) => void;
   onMove: (m: Move) => void;
   demo?: boolean; // non-interactive showcase (home screen)
+  focus?: boolean; // board is in fullscreen focus mode
+  onFocus?: () => void;
 }
 
 type Pop = { id: number; key: HandKey; text: string; kill: boolean };
@@ -55,7 +56,7 @@ function loadCamera(): CameraMode {
   }
 }
 
-export function Table({ state, rules, bottom, canAct, lastMove, ply, skins, sleeves, hint, view, onView, onMove, demo }: Props) {
+export function Table({ state, rules, bottom, canAct, lastMove, ply, skins, sleeves, hint, view, onView, onMove, demo, focus, onFocus }: Props) {
   const [shown, setShown] = useState(state);
   const [sel, setSel] = useState<0 | 1 | null>(null);
   const [transfer, setTransfer] = useState<Hands | null>(null);
@@ -216,18 +217,17 @@ export function Table({ state, rules, bottom, canAct, lastMove, ply, skins, slee
 
       {!demo && (
         <div className="board-tools">
-          <Seg
-            size="mini"
-            value={view}
-            onChange={onView}
-            options={[
-              { value: '2d', label: '2D' },
-              { value: '3d', label: '3D' },
-            ]}
-          />
+          <button className="tool-btn" onClick={() => onView(view === '2d' ? '3d' : '2d')} title={view === '2d' ? 'Switch to 3D' : 'Switch to 2D'} aria-label={view === '2d' ? 'Switch to 3D' : 'Switch to 2D'}>
+            <span className="tool-text">{view === '2d' ? '3D' : '2D'}</span>
+          </button>
           {view === '3d' && (
-            <button className="tool-btn" title={`Camera: ${CAMERA_NAME[camera]} (click to change)`} aria-label="Change camera angle" onClick={() => setCamera(CAMERA_ORDER[(CAMERA_ORDER.indexOf(camera) + 1) % 3])}>
-              <Video size={15} />
+            <button className="tool-btn" title={`Camera: ${CAMERA_NAME[camera]}`} aria-label="Change camera angle" onClick={() => setCamera(CAMERA_ORDER[(CAMERA_ORDER.indexOf(camera) + 1) % 3])}>
+              <Video size={16} />
+            </button>
+          )}
+          {onFocus && (
+            <button className="tool-btn" onClick={onFocus} title={focus ? 'Exit full screen' : 'Full screen'} aria-label={focus ? 'Exit full screen' : 'Full screen'}>
+              {focus ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
             </button>
           )}
         </div>

@@ -579,8 +579,9 @@ export class Scene3D {
     const w = this.host.clientWidth, h = this.host.clientHeight;
     const out: Record<string, { x: number; y: number }> = {};
     for (const rig of this.rigs.values()) {
-      const v = rig.base.clone().addScaledVector(rig.fingerDir, -0.035);
-      v.y = 0.09;
+      // chip sits on the back of the hand, never at the table edge
+      const v = rig.base.clone().addScaledVector(rig.fingerDir, 0.035);
+      v.y = 0.1;
       v.project(this.camera);
       out[rig.key] = { x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h };
     }
