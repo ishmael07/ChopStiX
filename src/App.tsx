@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Bot, Check, Copy, Link2, Minus, Plus, Settings, Users, Volume2, VolumeX } from 'lucide-react';
 import { Game, type GameConfig, type Remote } from './components/Game';
 import { Table, type ViewMode } from './components/Table';
 import { Learn } from './components/Learn';
+import { useAccount } from './account/useAccount';
+import { AuthSheet } from './account/AuthSheet';
+import { ProfilePage } from './account/ProfilePage';
+import { accountsEnabled } from './account/supabase';
 import { Avatar, Chips, clockLabel, Modal, Seg, Switch, usePref } from './components/ui';
 import { BOTS, botMove, type Bot as BotT } from './game/bots';
 import { applyMove, DEFAULT_RULES, initialState, MODES, modeOf, other, winner, type Move, type Rules, type Side, type State } from './game/rules';
@@ -10,7 +14,7 @@ import { loadProfile, saveProfile, SKINS, type Profile } from './game/profile';
 import { host, join, newRoomCode, type Link, type NetMsg } from './net/online';
 import { isMuted, setMuted, sfx } from './sound';
 
-type Screen = 'lobby' | 'game' | 'learn';
+type Screen = 'lobby' | 'game' | 'learn' | 'profile';
 type Opp = 'bot' | 'friend' | 'local';
 
 const CLOCKS = [
@@ -25,7 +29,32 @@ const CLOCK_STEPS = [15, 30, 45, 60, 90, 120, 180, 300, 420, 600, 900, 1200, 180
 export default function App() {
   const [profile, setProfileState] = useState<Profile>(loadProfile);
   const setProfile = (p: Profile) => (setProfileState(p), saveProfile(p));
-  const [screen, setScreen] = useState<Screen>('lobby');
+  const account = useAccount();
+  const ap = account.profile;
+  // Who "you" are: your account when signed in, otherwise the guest profile on this device.
+  const me: Profile = ap ? { ...profile, name: ap.display_name, rating: ap.rating, skin: ap.skin, wins: ap.wins, losses: ap.losses, draws: ap.draws, onboarded: true } : profile;
+  const meRef = useRef({ me, uid: account.session?.user.id });
+  meRef.current = { me, uid: account.session?.user.id };
+  const [authSheet, setAuthSheet] = useState<null | 'signin' | 'signup'>(null);
+  const [screen, setScreenState] = useState<Screen>(() => (location.hash.startsWith('#/@') ? 'profile' : 'lobby'));
+  const [profileUser, setProfileUser] = useState(() => decodeURIComponent(location.hash.slice(3)));
+  const setScreen = (sc: Screen) => {
+    setScreenState(sc);
+    if (sc !== 'profile' && location.hash) history.replaceState(null, '', location.pathname + location.search);
+  };
+  const openProfile = (u: string) => {
+    location.hash = `/@${u}`;
+  };
+  useEffect(() => {
+    const onHash = () => {
+      if (location.hash.startsWith('#/@')) {
+        setProfileUser(decodeURIComponent(location.hash.slice(3)));
+        setScreenState('profile');
+      }
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
   const [opp, setOpp] = useState<Opp>(() => (new URLSearchParams(location.search).get('room') ? 'friend' : 'bot'));
   const [config, setConfig] = useState<GameConfig | null>(null);
   const [gameKey, setGameKey] = useState(0);
@@ -58,10 +87,13 @@ export default function App() {
     oppName: string;
     oppRating: number;
     oppSkin?: number;
+    oppUid?: string;
     named?: boolean; // friend's hello has arrived
   }>({ role: null, code: '', status: 'idle', oppName: 'Friend', oppRating: 800 });
   const netRef = useRef(net);
   netRef.current = net;
+  const accountCfg = useRef<GameConfig['account']>(undefined);
+  accountCfg.current = ap ? { onRated: () => void account.refresh() } : undefined;
   const lobbyCfg = useRef({ rules, clock });
   lobbyCfg.current = { rules, clock };
 
@@ -76,30 +108,32 @@ export default function App() {
             },
             oppName: net.oppName,
             oppRating: net.oppRating,
+            oppUid: net.oppUid,
             connected: net.status === 'connected',
           }
         : undefined,
-    [net.role, net.oppName, net.oppRating, net.status],
+    [net.role, net.oppName, net.oppRating, net.oppUid, net.status],
   );
   const remoteRef = useRef(remote);
   remoteRef.current = remote;
 
   const sendStart = useCallback((hostSide: Side) => {
     const { rules, clock } = lobbyCfg.current;
-    linkRef.current?.send({ t: 'start', rules, clock, hostSide, game: Date.now() });
+    const game = Date.now();
+    linkRef.current?.send({ t: 'start', rules, clock, hostSide, game });
     sfx('start');
-    setConfig({ mode: 'online', rules, clock, mySide: hostSide, remote: remoteRef.current });
+    setConfig({ mode: 'online', rules, clock, mySide: hostSide, remote: remoteRef.current, gameKey: `${netRef.current.code}-${game}`, account: accountCfg.current });
     setGameKey((k) => k + 1);
     setScreen('game');
   }, []);
 
   const onNetMsg = useCallback((m: NetMsg) => {
-    if (m.t === 'hello') setNet((n) => ({ ...n, oppName: m.name || 'Friend', oppRating: m.rating, oppSkin: m.skin, named: true }));
+    if (m.t === 'hello') setNet((n) => ({ ...n, oppName: m.name || 'Friend', oppRating: m.rating, oppSkin: m.skin, oppUid: m.uid, named: true }));
     if (m.t === 'start') {
       sfx('start');
       setRules(m.rules);
       setClock(m.clock);
-      setConfig({ mode: 'online', rules: m.rules, clock: m.clock, mySide: other(m.hostSide), remote: remoteRef.current });
+      setConfig({ mode: 'online', rules: m.rules, clock: m.clock, mySide: other(m.hostSide), remote: remoteRef.current, gameKey: `${netRef.current.code}-${m.game}`, account: accountCfg.current });
       setGameKey((k) => k + 1);
       setScreen('game');
     }
@@ -109,8 +143,8 @@ export default function App() {
   const handlers = {
     open: () => {
       setNet((n) => ({ ...n, status: 'connected' }));
-      const p = loadProfile();
-      linkRef.current?.send({ t: 'hello', name: p.name, rating: p.rating, skin: p.skin });
+      const { me: p, uid } = meRef.current;
+      linkRef.current?.send({ t: 'hello', name: p.name, rating: p.rating, skin: p.skin, uid });
     },
     msg: onNetMsg,
     close: () => setNet((n) => ({ ...n, status: 'closed' })),
@@ -159,7 +193,7 @@ export default function App() {
   };
 
   const go = () => {
-    if (opp === 'bot') start({ mode: 'bot', rules, clock, mySide: pickSide(), bot });
+    if (opp === 'bot') start({ mode: 'bot', rules, clock, mySide: pickSide(), bot, account: accountCfg.current });
     else if (opp === 'local') start({ mode: 'local', rules, clock, mySide: 0 });
     else if (net.status === 'connected' && net.role === 'host') sendStart(pickSide());
     else if (net.role === 'host' && net.status === 'waiting') return;
@@ -172,7 +206,8 @@ export default function App() {
   const hosting = opp === 'friend' && net.role === 'host';
   const stepIdx = Math.max(0, CLOCK_STEPS.findIndex((c) => c >= clock));
 
-  if (!profile.onboarded)
+  if (account.loading) return null;
+  if (!profile.onboarded && !account.session)
     return (
       <Welcome
         skin={profile.skin}
@@ -182,6 +217,8 @@ export default function App() {
           // an invited friend may already be connected: tell the host our real name
           linkRef.current?.send({ t: 'hello', name, rating: profile.rating, skin });
         }}
+        onAccount={accountsEnabled ? () => setAuthSheet('signin') : undefined}
+        authSheet={authSheet && <AuthSheet initial={authSheet} onClose={() => setAuthSheet(null)} />}
       />
     );
 
@@ -200,9 +237,24 @@ export default function App() {
           </button>
         </nav>
         <div className="top-right">
-          <span className="rating-pill" title="Your rating">
-            {profile.rating}
-          </span>
+          {ap ? (
+            <button className="me-chip" onClick={() => openProfile(ap.username)} title="Your profile">
+              <Avatar name={ap.display_name} color={SKINS[ap.skin]} size={26} />
+              <span>{ap.display_name}</span>
+              <b>{ap.rating}</b>
+            </button>
+          ) : (
+            <>
+              <span className="rating-pill" title="Your rating on this device">
+                {profile.rating}
+              </span>
+              {accountsEnabled && (
+                <button className="btn small" onClick={() => setAuthSheet('signup')}>
+                  Sign up
+                </button>
+              )}
+            </>
+          )}
           <button
             className="icon-btn"
             aria-label={muted ? 'Unmute' : 'Mute'}
@@ -221,13 +273,13 @@ export default function App() {
 
       <main className="main">
         {screen === 'game' && config && (
-          <Game key={gameKey} config={config} profile={profile} setProfile={setProfile} onRematch={rematch} onExit={leaveGame} />
+          <Game key={gameKey} config={config} profile={me} setProfile={ap ? () => {} : setProfile} onRematch={rematch} onExit={leaveGame} />
         )}
 
         {screen === 'lobby' && (
           <div className="lobby screen">
             <div className="lobby-board">
-              <DemoTable view={view} skin={SKINS[profile.skin]} />
+              <DemoTable view={view} skin={SKINS[me.skin]} />
             </div>
 
             <section className="play-card">
@@ -277,7 +329,7 @@ export default function App() {
                 <div className="invite">
                   <Lobby
                     left={net.status === 'connected' && net.named ? { name: net.oppName, rating: net.oppRating, color: SKINS[net.oppSkin ?? 3], host: true } : null}
-                    right={{ name: profile.name, rating: profile.rating, color: SKINS[profile.skin], you: true }}
+                    right={{ name: me.name, rating: me.rating, color: SKINS[me.skin], you: true }}
                   />
                   {(net.status === 'error' || net.status === 'closed') ? (
                     <div className="notice warn">{net.error ?? 'Your friend closed the invite.'}</div>
@@ -352,7 +404,7 @@ export default function App() {
                   {hosting && (
                     <div className="invite">
                       <Lobby
-                        left={{ name: profile.name, rating: profile.rating, color: SKINS[profile.skin], you: true }}
+                        left={{ name: me.name, rating: me.rating, color: SKINS[me.skin], you: true }}
                         right={net.status === 'connected' ? { name: net.named ? net.oppName : 'Joining…', rating: net.named ? net.oppRating : null, color: SKINS[net.oppSkin ?? 3] } : null}
                       />
                       <div className="share">
@@ -388,24 +440,40 @@ export default function App() {
           </div>
         )}
 
-        {screen === 'learn' && <Learn skin={SKINS[profile.skin]} onPlay={() => setScreen('lobby')} />}
+        {screen === 'learn' && <Learn skin={SKINS[me.skin]} onPlay={() => setScreen('lobby')} />}
+        {screen === 'profile' && (accountsEnabled ? <ProfilePage username={profileUser} account={account} onOpen={openProfile} /> : <div className="screen"><h1>Profiles need accounts, which aren't switched on yet.</h1></div>)}
       </main>
 
       {sheet === 'settings' && (
         <Modal onClose={() => setSheet(null)}>
           <h2>Settings</h2>
-          <div className="field">
-            <label>Name</label>
-            <input className="text" value={profile.name} maxLength={18} onChange={(e) => setProfile({ ...profile, name: e.target.value })} />
-          </div>
-          <div className="field">
-            <label>Hands</label>
-            <div className="skins">
-              {SKINS.map((s, i) => (
-                <button key={s} className={`skin ${profile.skin === i ? 'on' : ''}`} style={{ background: s }} onClick={() => setProfile({ ...profile, skin: i })} aria-label={`Skin tone ${i + 1}`} />
-              ))}
+          {ap ? (
+            <div className="account-row">
+              <Avatar name={ap.display_name} color={SKINS[ap.skin]} size={40} />
+              <div>
+                <b>{ap.display_name}</b>
+                <span className="muted">@{ap.username}</span>
+              </div>
+              <button className="btn small" onClick={() => (setSheet(null), openProfile(ap.username))}>
+                Profile
+              </button>
             </div>
-          </div>
+          ) : (
+            <>
+              <div className="field">
+                <label>Name</label>
+                <input className="text" value={profile.name} maxLength={18} onChange={(e) => setProfile({ ...profile, name: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Hands</label>
+                <div className="skins">
+                  {SKINS.map((sk, i) => (
+                    <button key={sk} className={`skin ${profile.skin === i ? 'on' : ''}`} style={{ background: sk }} onClick={() => setProfile({ ...profile, skin: i })} aria-label={`Skin tone ${i + 1}`} />
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
           <div className="field">
             <label>Board</label>
             <Seg
@@ -417,25 +485,29 @@ export default function App() {
               ]}
             />
           </div>
-          <div className="stats">
-            <div>
-              <b>{profile.wins}</b>
-              <span>Wins</span>
+          {ap ? (
+            <button className="link-btn danger" onClick={() => (setSheet(null), void account.signOut())}>
+              Log out
+            </button>
+          ) : accountsEnabled ? (
+            <div className="guest-cta">
+              <p className="muted">You're playing as a guest. Your rating is saved on this device only.</p>
+              <button className="btn primary" onClick={() => (setSheet(null), setAuthSheet('signup'))}>
+                Create an account
+              </button>
+              <button className="link-btn center" onClick={() => (setSheet(null), setAuthSheet('signin'))}>
+                I already have one
+              </button>
             </div>
-            <div>
-              <b>{profile.losses}</b>
-              <span>Losses</span>
-            </div>
-            <div>
-              <b>{profile.draws}</b>
-              <span>Draws</span>
-            </div>
-          </div>
-          <button className="link-btn danger" onClick={() => setProfile({ ...profile, rating: 800, wins: 0, losses: 0, draws: 0, history: [] })}>
-            Reset rating and stats
-          </button>
+          ) : (
+            <button className="link-btn danger" onClick={() => setProfile({ ...profile, rating: 800, wins: 0, losses: 0, draws: 0, history: [] })}>
+              Reset rating and stats
+            </button>
+          )}
         </Modal>
       )}
+
+      {authSheet && <AuthSheet initial={authSheet} defaultName={profile.onboarded ? profile.name : ''} onClose={() => setAuthSheet(null)} />}
     </div>
   );
 }
@@ -474,7 +546,7 @@ function DemoTable({ view, skin }: { view: ViewMode; skin: string }) {
   );
 }
 
-function Welcome({ skin: initialSkin, onDone }: { skin: number; onDone: (name: string, skin: number) => void }) {
+function Welcome({ skin: initialSkin, onDone, onAccount, authSheet }: { skin: number; onDone: (name: string, skin: number) => void; onAccount?: () => void; authSheet?: ReactNode }) {
   const [name, setName] = useState('');
   const [skin, setSkin] = useState(initialSkin);
   const clean = name.trim().replace(/\s+/g, ' ');
@@ -503,7 +575,13 @@ function Welcome({ skin: initialSkin, onDone }: { skin: number; onDone: (name: s
           Let&apos;s play
         </button>
         <p className="welcome-note">Saved on this device. No account needed.</p>
+        {onAccount && (
+          <button type="button" className="link-btn center" onClick={onAccount}>
+            Have an account? Log in
+          </button>
+        )}
       </form>
+      {authSheet}
     </div>
   );
 }

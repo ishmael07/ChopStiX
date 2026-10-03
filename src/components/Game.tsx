@@ -6,7 +6,9 @@ import { applyMove, describeRules, initialState, legalMoves, other, positionKey,
 import { evalBar, rankedMoves } from '../game/solver';
 import { botMove, type Bot } from '../game/bots';
 import { GRADE_META, reviewGame, type Grade } from '../game/review';
-import { eloDelta, SKINS, type Profile } from '../game/profile';
+import { SKINS, type Profile } from '../game/profile';
+import { ratingChange } from '../game/rating';
+import { supabase, type RatedResult } from '../account/supabase';
 import type { NetMsg } from '../net/online';
 import { sfx } from '../sound';
 
@@ -15,6 +17,7 @@ export interface Remote {
   subscribe: (fn: (m: NetMsg) => void) => () => void;
   oppName: string;
   oppRating: number;
+  oppUid?: string; // set when the friend is signed in
   connected: boolean;
 }
 
@@ -25,6 +28,10 @@ export interface GameConfig {
   mySide: Side; // which side the local player controls (bot/online)
   bot?: Bot;
   remote?: Remote;
+  /** Signed-in player: games are rated on the server instead of locally. */
+  account?: { onRated: () => void };
+  /** Shared id for a friend game, the same on both screens. */
+  gameKey?: string;
 }
 
 type Reason = 'knockout' | 'resignation' | 'time' | 'repetition' | 'abandonment';
@@ -124,7 +131,8 @@ export function Game({
 
   const finished = useRef(false);
   const [revealed, setRevealed] = useState(false);
-  const [oldRating] = useState(profile.rating);
+  const [oldRating, setOldRating] = useState(profile.rating);
+  const [ratingNote, setRatingNote] = useState<string | null>(null);
   const startedAt = useRef(Date.now());
   const [duration, setDuration] = useState(0);
   const movesRef = useRef<Move[]>([]);
@@ -146,19 +154,22 @@ export function Game({
           sfx(score === 1 ? 'win' : 'lose');
           const p = profileRef.current;
           const oppRating = mode === 'bot' ? bot!.rating : remote!.oppRating;
-          const d = eloDelta(p.rating, oppRating, score);
-          setDelta(d);
-          setProfile({
-            ...p,
-            rating: p.rating + d,
-            wins: p.wins + (score === 1 ? 1 : 0),
-            losses: p.losses + (score === 0 ? 1 : 0),
-            draws: p.draws + (score === 0.5 ? 1 : 0),
-            history: [
-              { opp: mode === 'bot' ? bot!.name : remote!.oppName, result: (score === 1 ? 'win' : score === 0 ? 'loss' : 'draw') as 'win' | 'loss' | 'draw', delta: d, at: Date.now() },
-              ...p.history,
-            ].slice(0, 30),
-          });
+          if (config.account && supabase) void rateOnServer(r);
+          else {
+            const d = ratingChange(p.rating, oppRating, score, p.wins + p.losses + p.draws);
+            setDelta(d);
+            setProfile({
+              ...p,
+              rating: p.rating + d,
+              wins: p.wins + (score === 1 ? 1 : 0),
+              losses: p.losses + (score === 0 ? 1 : 0),
+              draws: p.draws + (score === 0.5 ? 1 : 0),
+              history: [
+                { opp: mode === 'bot' ? bot!.name : remote!.oppName, result: (score === 1 ? 'win' : score === 0 ? 'loss' : 'draw') as 'win' | 'loss' | 'draw', delta: d, at: Date.now() },
+                ...p.history,
+              ].slice(0, 30),
+            });
+          }
         } else sfx('win');
         if (movesRef.current.length) setReview(reviewGame(rules, movesRef.current));
         setRevealed(true);
@@ -167,6 +178,43 @@ export function Game({
     },
     [bot, config.mySide, mode, remote, rules, setProfile],
   );
+
+  // Rated games for signed-in players are scored by the database, which replays the moves.
+  async function rateOnServer(r: Result) {
+    const moves = movesRef.current;
+    let res: RatedResult | null = null;
+    try {
+      if (mode === 'bot') {
+        const { data, error } = await supabase!.rpc('record_bot_game', {
+          p_key: crypto.randomUUID(), p_bot: bot!.id, p_side: config.mySide, p_rules: rules, p_moves: moves, p_reason: r.reason,
+        });
+        if (error) throw error;
+        res = data as RatedResult;
+      } else if (mode === 'online') {
+        if (!remote?.oppUid || !config.gameKey) return setRatingNote('Unrated: your friend is playing as a guest.');
+        if (r.reason === 'abandonment') return setRatingNote('Unrated: your opponent left.');
+        const args = { p_key: config.gameKey, p_opponent: remote.oppUid, p_side: config.mySide, p_rules: rules, p_moves: moves, p_winner: r.winner, p_reason: r.reason };
+        for (let i = 0; i < 12; i++) {
+          const { data, error } = await supabase!.rpc('report_online_game', args);
+          if (error) throw error;
+          res = data as RatedResult;
+          if (res.status !== 'pending') break;
+          setRatingNote(`Waiting for ${remote.oppName} to confirm the result…`);
+          await new Promise((ok) => setTimeout(ok, 2500));
+        }
+      }
+    } catch (e) {
+      return setRatingNote(`Couldn't save the result: ${(e as Error).message}`);
+    }
+    if (!res) return;
+    if (res.status === 'rated') {
+      setRatingNote(null);
+      setOldRating(res.before!);
+      setDelta(res.delta!);
+      config.account!.onRated();
+    } else if (res.status === 'mismatch') setRatingNote("Unrated: the two screens didn't agree on the result.");
+    else setRatingNote(`Unrated: ${remote?.oppName ?? 'your opponent'} never confirmed.`);
+  }
 
   const play = useCallback(
     (m: Move, fromRemote = false) => {
@@ -421,6 +469,7 @@ export function Game({
                 </span>
               )}
             </div>
+            {ratingNote && <div className="rating-note">{ratingNote}</div>}
             {review && (
               <div className="post-acc">
                 {([0, 1] as Side[]).map((sd) => (
@@ -548,6 +597,7 @@ export function Game({
               </span>
             </div>
           )}
+          {ratingNote && <div className="rating-note center">{ratingNote}</div>}
           <div className="result-actions">
             <button className="btn primary" onClick={() => (setShowModal(false), rematch())} disabled={rematchAsked.me}>
               <RotateCcw size={17} /> Rematch

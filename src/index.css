@@ -489,7 +489,7 @@ p { margin: 0; }
 .tour-dots { display: flex; gap: 6px; }
 .tour-dots button { width: 8px; height: 8px; border-radius: 99px; background: var(--surface-3); transition: width 0.35s var(--smooth), background 0.3s; }
 .tour-dots button.on { width: 24px; background: var(--accent); }
-.learn-more { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.learn-more { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .lm-card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; }
 .lm-card h3 { font-size: 16px; color: var(--muted); font-weight: 600; }
 .lm-row { display: flex; flex-direction: column; gap: 2px; }
@@ -546,3 +546,71 @@ kbd { font-family: 'Geist Mono', monospace; font-size: 12px; padding: 1px 6px; b
 .seat-vs.ready { color: var(--accent-hi); }
 .lobby-status { text-align: center; color: var(--muted); }
 .icon-btn.solid.ok { background: var(--accent); color: var(--accent-ink); }
+
+.tour-board { position: relative; }
+.try-btn { align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: 99px; font-weight: 600; background: var(--accent-soft); color: var(--accent-hi); transition: background 0.2s, transform 0.15s; }
+.try-btn:hover:not(:disabled) { background: #82c55e33; }
+.try-btn:disabled { opacity: 0.6; }
+.try-btn.done { background: var(--surface-2); color: var(--muted); }
+.try-banner { position: absolute; left: 50%; bottom: 16px; translate: -50% 0; z-index: 8; display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 99px; background: #0f1011d9; backdrop-filter: blur(10px); font-weight: 600; white-space: nowrap; box-shadow: 0 10px 30px #0007; animation: dockIn 0.35s var(--spring); pointer-events: none; }
+.try-banner.done { background: var(--accent); color: var(--accent-ink); }
+.try-banner.nope { background: #ef6a55; color: #fff; animation: shake 0.4s; }
+@keyframes shake { 25% { translate: calc(-50% - 6px) 0; } 75% { translate: calc(-50% + 6px) 0; } }
+@media (max-width: 1100px) { .learn-more { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 900px) { .learn-more { grid-template-columns: 1fr; } }
+
+/* ---------- accounts ---------- */
+.btn.small { height: 34px; padding: 0 14px; font-size: 14px; border-radius: 10px; }
+.me-chip { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px 0 6px; border-radius: 99px; background: var(--surface-2); font-weight: 600; font-size: 14px; transition: background 0.2s; }
+.me-chip:hover { background: var(--surface-3); }
+.me-chip b { font-family: 'Geist Mono', monospace; color: var(--muted); font-weight: 600; }
+.auth-form { display: flex; flex-direction: column; gap: 14px; }
+.auth-form label { display: flex; flex-direction: column; gap: 6px; }
+.auth-form label > span { font-size: 14px; color: var(--muted); font-weight: 500; }
+.auth-form .text:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.auth-note { color: var(--faint); font-size: 13px; text-align: center; }
+.em { color: var(--text); }
+.account-row { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 14px; background: var(--surface-2); }
+.account-row > div { flex: 1; display: flex; flex-direction: column; }
+.guest-cta { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
+.rating-note { font-size: 13px; color: var(--muted); padding: 8px 12px; border-radius: 10px; background: var(--surface-2); }
+.rating-note.center { text-align: center; }
+
+/* profile */
+.profile { max-width: 860px; display: flex; flex-direction: column; gap: 16px; }
+.pf-head { display: flex; align-items: center; gap: 18px; padding: 8px 4px 12px; }
+.pf-id { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.pf-id h1 { font-size: 32px; font-weight: 800; }
+.pf-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; }
+.pf-card { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; }
+.pf-label { color: var(--muted); font-size: 14px; font-weight: 500; }
+.pf-rating { font-family: 'Geist Mono', monospace; font-size: 54px; line-height: 1; letter-spacing: -0.03em; }
+.pf-title { color: var(--accent-hi); font-weight: 600; }
+.pf-title i { color: var(--faint); font-style: normal; font-weight: 500; }
+.pf-peak { color: var(--faint); font-size: 13px; font-family: 'Geist Mono', monospace; }
+.spark { width: 100%; height: 64px; margin-top: 4px; }
+.pf-record { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pf-record div { display: flex; flex-direction: column; }
+.pf-record b { font-family: 'Geist Mono', monospace; font-size: 30px; }
+.pf-record span { color: var(--muted); font-size: 13px; }
+.pf-bar { display: flex; height: 8px; border-radius: 99px; overflow: hidden; background: var(--surface-3); margin: 6px 0 2px; }
+.pf-bar i.w { background: var(--accent); }
+.pf-bar i.d { background: #8b8c92; }
+.pf-bar i.l { background: var(--red); }
+.pf-games { display: flex; flex-direction: column; }
+.pf-game { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto 56px 56px; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.pf-game:first-child { border-top: 0; }
+.pf-opp { font-weight: 600; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-opp.link:hover { color: var(--accent-hi); }
+.pf-meta, .pf-when { font-size: 13px; }
+.pf-when { text-align: right; }
+.pf-game .delta { justify-self: end; font-size: 13px; }
+.res { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; font-weight: 800; font-size: 12px; color: #111; }
+.res.win { background: var(--accent); } .res.loss { background: var(--red); color: #fff; } .res.draw { background: #8b8c92; }
+@media (max-width: 700px) {
+  .pf-grid { grid-template-columns: 1fr; }
+  .pf-head { flex-wrap: wrap; }
+  .pf-game { grid-template-columns: 26px minmax(0, 1fr) 52px; }
+  .pf-meta, .pf-when { display: none; }
+}
+.auth-form .text, .field .text { flex: none; height: 46px; }
