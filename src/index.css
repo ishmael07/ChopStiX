@@ -529,3 +529,5 @@ kbd { font-family: 'Geist Mono', monospace; font-size: 12px; padding: 1px 6px; b
 :fullscreen .topbar { display: none; }
 :fullscreen .main { padding: 16px; }
 :fullscreen .game.focus .board-col { width: min(calc(100vw - 48px), calc((100vh - 150px) * 0.98)); }
+.seg-ico { display: inline-flex; align-items: center; gap: 7px; line-height: 1; }
+.seg-ico svg { flex: none; display: block; }

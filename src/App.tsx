@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Copy, Minus, Plus, Settings, Volume2, VolumeX } from 'lucide-react';
+import { Bot, Check, Copy, Link2, Minus, Plus, Settings, Users, Volume2, VolumeX } from 'lucide-react';
 import { Game, type GameConfig, type Remote } from './components/Game';
 import { Table, type ViewMode } from './components/Table';
 import { Learn } from './components/Learn';
@@ -232,9 +232,9 @@ export default function App() {
                 value={opp}
                 onChange={setOpp}
                 options={[
-                  { value: 'bot', label: 'Computer' },
-                  { value: 'friend', label: 'Friend' },
-                  { value: 'local', label: 'Local' },
+                  { value: 'bot', label: <span className="seg-ico"><Bot size={17} /> Computer</span> },
+                  { value: 'friend', label: <span className="seg-ico"><Link2 size={17} /> Friend</span> },
+                  { value: 'local', label: <span className="seg-ico"><Users size={17} /> Local</span> },
                 ]}
               />
 
