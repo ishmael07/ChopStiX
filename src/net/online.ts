@@ -3,7 +3,7 @@ import Peer, { type DataConnection } from 'peerjs';
 import type { Move, Rules } from '../game/rules';
 
 export type NetMsg =
-  | { t: 'hello'; name: string; rating: number }
+  | { t: 'hello'; name: string; rating: number; skin?: number }
   | { t: 'start'; rules: Rules; hostSide: 0 | 1; clock: number; game: number }
   | { t: 'move'; move: Move; ply: number; clockLeft: number }
   | { t: 'resign' }

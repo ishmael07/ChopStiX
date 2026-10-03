@@ -57,6 +57,8 @@ export default function App() {
     error?: string;
     oppName: string;
     oppRating: number;
+    oppSkin?: number;
+    named?: boolean; // friend's hello has arrived
   }>({ role: null, code: '', status: 'idle', oppName: 'Friend', oppRating: 800 });
   const netRef = useRef(net);
   netRef.current = net;
@@ -92,7 +94,7 @@ export default function App() {
   }, []);
 
   const onNetMsg = useCallback((m: NetMsg) => {
-    if (m.t === 'hello') setNet((n) => ({ ...n, oppName: m.name || 'Friend', oppRating: m.rating }));
+    if (m.t === 'hello') setNet((n) => ({ ...n, oppName: m.name || 'Friend', oppRating: m.rating, oppSkin: m.skin, named: true }));
     if (m.t === 'start') {
       sfx('start');
       setRules(m.rules);
@@ -108,7 +110,7 @@ export default function App() {
     open: () => {
       setNet((n) => ({ ...n, status: 'connected' }));
       const p = loadProfile();
-      linkRef.current?.send({ t: 'hello', name: p.name, rating: p.rating });
+      linkRef.current?.send({ t: 'hello', name: p.name, rating: p.rating, skin: p.skin });
     },
     msg: onNetMsg,
     close: () => setNet((n) => ({ ...n, status: 'closed' })),
@@ -160,6 +162,7 @@ export default function App() {
     if (opp === 'bot') start({ mode: 'bot', rules, clock, mySide: pickSide(), bot });
     else if (opp === 'local') start({ mode: 'local', rules, clock, mySide: 0 });
     else if (net.status === 'connected' && net.role === 'host') sendStart(pickSide());
+    else if (net.role === 'host' && net.status === 'waiting') return;
     else createRoom();
   };
 
@@ -177,7 +180,7 @@ export default function App() {
           sfx('start');
           setProfile({ ...profile, name, skin, onboarded: true });
           // an invited friend may already be connected: tell the host our real name
-          linkRef.current?.send({ t: 'hello', name, rating: profile.rating });
+          linkRef.current?.send({ t: 'hello', name, rating: profile.rating, skin });
         }}
       />
     );
@@ -272,9 +275,15 @@ export default function App() {
 
               {opp === 'friend' && net.role === 'guest' ? (
                 <div className="invite">
-                  {net.status === 'waiting' && <Spinner text="Joining game…" />}
-                  {net.status === 'connected' && <Spinner text={`Connected. Waiting for ${net.oppName} to start…`} />}
-                  {(net.status === 'error' || net.status === 'closed') && <div className="notice warn">{net.error ?? 'Connection closed'}</div>}
+                  <Lobby
+                    left={net.status === 'connected' && net.named ? { name: net.oppName, rating: net.oppRating, color: SKINS[net.oppSkin ?? 3], host: true } : null}
+                    right={{ name: profile.name, rating: profile.rating, color: SKINS[profile.skin], you: true }}
+                  />
+                  {(net.status === 'error' || net.status === 'closed') ? (
+                    <div className="notice warn">{net.error ?? 'Your friend closed the invite.'}</div>
+                  ) : (
+                    <p className="lobby-status">{net.status === 'connected' ? `Waiting for ${net.oppName} to start` : 'Joining…'}</p>
+                  )}
                 </div>
               ) : (
                 <>
@@ -342,10 +351,14 @@ export default function App() {
 
                   {hosting && (
                     <div className="invite">
+                      <Lobby
+                        left={{ name: profile.name, rating: profile.rating, color: SKINS[profile.skin], you: true }}
+                        right={net.status === 'connected' ? { name: net.named ? net.oppName : 'Joining…', rating: net.named ? net.oppRating : null, color: SKINS[net.oppSkin ?? 3] } : null}
+                      />
                       <div className="share">
                         <input readOnly value={shareUrl} onFocus={(e) => e.target.select()} aria-label="Invite link" />
                         <button
-                          className="icon-btn solid"
+                          className={`icon-btn solid ${copied ? 'ok' : ''}`}
                           aria-label="Copy link"
                           onClick={() => {
                             navigator.clipboard?.writeText(shareUrl);
@@ -356,14 +369,13 @@ export default function App() {
                           {copied ? <Check size={18} /> : <Copy size={18} />}
                         </button>
                       </div>
-                      {net.status === 'waiting' && <Spinner text="Waiting for your friend…" />}
-                      {net.status === 'connected' && <div className="notice ok">{net.oppName} joined</div>}
+                      {net.status === 'closed' && <div className="notice warn">Your friend left. Create a new link to invite someone else.</div>}
                       {net.status === 'error' && <div className="notice warn">{net.error}</div>}
                     </div>
                   )}
 
-                  <button className="btn primary play-btn" onClick={go} disabled={hosting && net.status !== 'connected'}>
-                    {opp === 'friend' ? (net.role === 'host' ? (net.status === 'connected' ? 'Start game' : 'Waiting…') : 'Create invite link') : 'Play'}
+                  <button className="btn primary play-btn" onClick={go} disabled={hosting && net.status === 'waiting'}>
+                    {opp === 'friend' ? (net.role === 'host' ? (net.status === 'connected' ? 'Start game' : net.status === 'closed' || net.status === 'error' ? 'Create new link' : 'Waiting for friend…') : 'Create invite link') : 'Play'}
                   </button>
                   {hosting && (
                     <button className="link-btn center" onClick={cancelRoom}>
@@ -428,14 +440,6 @@ export default function App() {
   );
 }
 
-function Spinner({ text }: { text: string }) {
-  return (
-    <div className="spinner-row">
-      <span className="spinner" />
-      {text}
-    </div>
-  );
-}
 
 /** Two bots quietly playing on the home screen. */
 function DemoTable({ view, skin }: { view: ViewMode; skin: string }) {
@@ -500,6 +504,33 @@ function Welcome({ skin: initialSkin, onDone }: { skin: number; onDone: (name: s
         </button>
         <p className="welcome-note">Saved on this device. No account needed.</p>
       </form>
+    </div>
+  );
+}
+
+type LobbySeat = { name: string; rating: number | null; color: string; you?: boolean; host?: boolean } | null;
+
+/** Two seats facing off. An empty seat pulses until someone sits down. */
+function Lobby({ left, right }: { left: LobbySeat; right: LobbySeat }) {
+  const seat = (p: LobbySeat, k: string) =>
+    p ? (
+      <div className="seat in" key={`${k}-${p.name}`}>
+        <Avatar name={p.name} color={p.color} size={60} />
+        <b>{p.name}</b>
+        <span>{p.you ? 'You' : p.host ? 'Host' : p.rating ?? ''}</span>
+      </div>
+    ) : (
+      <div className="seat empty" key={`${k}-empty`}>
+        <span className="seat-ring" />
+        <b>Waiting…</b>
+        <span>&nbsp;</span>
+      </div>
+    );
+  return (
+    <div className="lobby-seats">
+      {seat(left, 'l')}
+      <span className={`seat-vs ${left && right ? 'ready' : ''}`}>vs</span>
+      {seat(right, 'r')}
     </div>
   );
 }

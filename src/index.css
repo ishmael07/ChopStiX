@@ -531,3 +531,18 @@ kbd { font-family: 'Geist Mono', monospace; font-size: 12px; padding: 1px 6px; b
 :fullscreen .game.focus .board-col { width: min(calc(100vw - 48px), calc((100vh - 150px) * 0.98)); }
 .seg-ico { display: inline-flex; align-items: center; gap: 7px; line-height: 1; }
 .seg-ico svg { flex: none; display: block; }
+
+/* ---------- friend lobby ---------- */
+.lobby-seats { display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 8px; padding: 18px 8px 8px; }
+.seat { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; }
+.seat b { font-size: 15px; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seat > span:last-child { color: var(--faint); font-size: 13px; font-family: 'Geist Mono', monospace; margin-top: -4px; }
+.seat.in { animation: seatIn 0.5s var(--spring); }
+@keyframes seatIn { from { opacity: 0; transform: scale(0.7); } }
+.seat.empty b { color: var(--faint); font-weight: 500; }
+.seat-ring { width: 60px; height: 60px; border-radius: 50%; border: 2px dashed #3a3b40; animation: ring 1.8s ease-in-out infinite; }
+@keyframes ring { 50% { border-color: #5a5b62; transform: scale(1.05); } }
+.seat-vs { margin-top: 20px; font-size: 13px; font-weight: 700; color: var(--faint); letter-spacing: 0.04em; transition: color 0.3s; }
+.seat-vs.ready { color: var(--accent-hi); }
+.lobby-status { text-align: center; color: var(--muted); }
+.icon-btn.solid.ok { background: var(--accent); color: var(--accent-ink); }
