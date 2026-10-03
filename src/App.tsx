@@ -553,8 +553,11 @@ function Welcome({ skin: initialSkin, onDone, onAccount, authSheet }: { skin: nu
   const invited = new URLSearchParams(location.search).has('room');
   return (
     <div className="welcome">
+      <div className="welcome-board">
+        <DemoTable view="2d" skin={SKINS[skin]} />
+      </div>
       <form
-        className="welcome-card"
+        className="welcome-form"
         onSubmit={(e) => {
           e.preventDefault();
           if (clean) onDone(clean, skin);
@@ -563,23 +566,35 @@ function Welcome({ skin: initialSkin, onDone, onAccount, authSheet }: { skin: nu
         <div className="welcome-mark">
           ChopSti<em>X</em>
         </div>
-        <p className="welcome-sub">{invited ? 'A friend invited you to a game.' : 'Chopsticks, the way it deserves to be played.'}</p>
-        <label htmlFor="name">What should we call you?</label>
-        <input id="name" className="text big" autoFocus autoComplete="nickname" maxLength={18} placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} />
-        <div className="skins welcome-skins" role="radiogroup" aria-label="Hand tone">
-          {SKINS.map((s, i) => (
-            <button type="button" key={s} role="radio" aria-checked={skin === i} className={`skin ${skin === i ? 'on' : ''}`} style={{ background: s }} onClick={() => setSkin(i)} aria-label={`Hand tone ${i + 1}`} />
-          ))}
+        <h1 className="welcome-h">{invited ? 'You’ve been invited to a game.' : 'The finger game, played properly.'}</h1>
+        <p className="welcome-sub">{invited ? 'Pick a name and you’re in.' : 'Play bots, friends, or the person next to you.'}</p>
+
+        <div className="welcome-fields">
+          <label className="wf">
+            <span>Name</span>
+            <input id="name" className="text big" autoFocus autoComplete="nickname" maxLength={18} placeholder="What should we call you?" value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <div className="wf">
+            <span>Hands</span>
+            <div className="tones" role="radiogroup" aria-label="Hand tone">
+              {SKINS.map((s, i) => (
+                <button type="button" key={s} role="radio" aria-checked={skin === i} className={`tone ${skin === i ? 'on' : ''}`} style={{ background: s }} onClick={() => setSkin(i)} aria-label={`Hand tone ${i + 1}`} />
+              ))}
+            </div>
+          </div>
         </div>
+
         <button className="btn primary play-btn" disabled={!clean}>
-          Let&apos;s play
+          {invited ? 'Join game' : 'Start playing'}
         </button>
-        <p className="welcome-note">Saved on this device. No account needed.</p>
-        {onAccount && (
-          <button type="button" className="link-btn center" onClick={onAccount}>
-            Have an account? Log in
-          </button>
-        )}
+        <div className="welcome-foot">
+          <span>No account needed. Saved on this device.</span>
+          {onAccount && (
+            <button type="button" className="link-btn" onClick={onAccount}>
+              Log in
+            </button>
+          )}
+        </div>
       </form>
       {authSheet}
     </div>

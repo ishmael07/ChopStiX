@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, ArrowLeftRight, Check, Hand, Lightbulb, MousePointerClick } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Hand } from 'lucide-react';
 import { sfx } from '../sound';
 import { Table } from './Table';
-import { applyMove, CLASSIC, MODES, type Move, type State } from '../game/rules';
+import { applyMove, CLASSIC, type Move, type State } from '../game/rules';
 
 interface Step {
   title: string;
@@ -166,48 +166,28 @@ export function Learn({ skin, onPlay }: { skin: string; onPlay: () => void }) {
         </div>
       </section>
 
-      <section className="learn-more">
-        <div className="lm-card">
-          <h3>Two rule sets</h3>
-          {(['classic', 'street'] as const).map((id) => (
-            <div className="lm-row" key={id}>
-              <b>{MODES[id].name}</b>
-              <span>{id === 'classic' ? 'Splits must change something. No flipping or emptying a hand.' : 'Swap freely, flip 3-1 into 1-3, even empty a hand.'}</span>
-            </div>
-          ))}
-        </div>
-        <div className="lm-card">
-          <h3>Quick tips</h3>
-          <div className="lm-row icon">
-            <Lightbulb size={18} />
-            <span>Don&apos;t leave a hand where one tap makes 5. A 4 next to their 1 is a gift.</span>
+      <section className="facts">
+        <h2>Good to know</h2>
+        <dl>
+          <div>
+            <dt>Classic</dt>
+            <dd>5 or more is out. A split has to change something, so no flipping 3-1 into 1-3 and no emptying a hand.</dd>
           </div>
-          <div className="lm-row icon">
-            <Lightbulb size={18} />
-            <span>Splitting a big hand into two small ones is often the safest move.</span>
+          <div>
+            <dt>Lunch Table</dt>
+            <dd>Same, but swap however you like, even flipping or emptying a hand.</dd>
           </div>
-          <div className="lm-row icon">
-            <Lightbulb size={18} />
-            <span>With perfect play it&apos;s a draw. Every win comes from someone&apos;s mistake.</span>
+          <div>
+            <dt>Controls</dt>
+            <dd>
+              Click your hand, then theirs, or drag one onto the other. <kbd>S</kbd> splits, <kbd>←</kbd> <kbd>→</kbd> move fingers, <kbd>Enter</kbd> confirms.
+            </dd>
           </div>
-        </div>
-        <div className="lm-card">
-          <h3>Controls</h3>
-          <div className="lm-row icon">
-            <MousePointerClick size={18} />
-            <span>Click your hand, then theirs. Or drag one onto the other.</span>
+          <div>
+            <dt>Strategy</dt>
+            <dd>Never leave a hand one tap away from 5. With perfect play the game is a draw, so every win comes from a mistake.</dd>
           </div>
-          <div className="lm-row icon">
-            <ArrowLeftRight size={18} />
-            <span>
-              Press <kbd>Split</kbd> or <kbd>S</kbd>, move fingers with <kbd>←</kbd> <kbd>→</kbd>, confirm with <kbd>Enter</kbd>.
-            </span>
-          </div>
-          <div className="lm-row icon">
-            <Hand size={18} />
-            <span>Stuck? Hint shows the best move.</span>
-          </div>
-        </div>
+        </dl>
       </section>
     </div>
   );
