@@ -1,21 +1,28 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Bot, Check, Copy, Link2, Minus, Plus, Settings, Users, Volume2, VolumeX } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Bot, Check, Copy, Flame, Globe, GraduationCap, Hand, Link2, Minus, Plus, Puzzle, Settings, Swords, Trophy, UserRound, Users, Volume2, VolumeX, X } from 'lucide-react';
 import { Game, type GameConfig, type Remote } from './components/Game';
 import { Table, type ViewMode } from './components/Table';
 import { Learn } from './components/Learn';
 import { useAccount } from './account/useAccount';
-import { AuthSheet } from './account/AuthSheet';
+import { AuthPage, type AuthTab } from './account/AuthPage';
 import { ProfilePage } from './account/ProfilePage';
+import { GameViewer } from './account/GameViewer';
+import { ChangePassword } from './account/ChangePassword';
+import { FriendsSheet } from './account/Friends';
+import { Puzzles } from './components/Puzzles';
+import { Leaderboard } from './components/Leaderboard';
+import { cancelChallenge, challengeFriend, dailyPuzzle, heartbeat, respondChallenge, type Challenge, type Daily, type PlayerCard } from './net/social';
 import { accountsEnabled } from './account/supabase';
 import { Avatar, Chips, clockLabel, Modal, Seg, Switch, usePref } from './components/ui';
 import { BOTS, botMove, type Bot as BotT } from './game/bots';
 import { applyMove, DEFAULT_RULES, initialState, MODES, modeOf, other, winner, type Move, type Rules, type Side, type State } from './game/rules';
 import { loadProfile, saveProfile, SKINS, type Profile } from './game/profile';
 import { host, join, newRoomCode, type Link, type NetMsg } from './net/online';
+import { currentMatch, findMatch, getMatch, leaveQueue, openMatch, QUICK_CLOCKS, type MatchLink, type MatchRow, type QuickMode } from './net/match';
 import { isMuted, setMuted, sfx } from './sound';
 
-type Screen = 'lobby' | 'game' | 'learn' | 'profile';
-type Opp = 'bot' | 'friend' | 'local';
+type Screen = 'lobby' | 'game' | 'learn' | 'profile' | 'auth' | 'replay' | 'puzzles' | 'leaderboard';
+type Opp = 'quick' | 'bot' | 'friend' | 'local';
 
 const CLOCKS = [
   { value: 0, label: 'None' },
@@ -35,21 +42,41 @@ export default function App() {
   const me: Profile = ap ? { ...profile, name: ap.display_name, rating: ap.rating, skin: ap.skin, wins: ap.wins, losses: ap.losses, draws: ap.draws, onboarded: true } : profile;
   const meRef = useRef({ me, uid: account.session?.user.id });
   meRef.current = { me, uid: account.session?.user.id };
-  const [authSheet, setAuthSheet] = useState<null | 'signin' | 'signup'>(null);
-  const [screen, setScreenState] = useState<Screen>(() => (location.hash.startsWith('#/@') ? 'profile' : 'lobby'));
-  const [profileUser, setProfileUser] = useState(() => decodeURIComponent(location.hash.slice(3)));
+  const [authTab, setAuthTab] = useState<AuthTab>('signup');
+  // Shareable pages live in the hash: #/@username for a profile, #/game/123 for a finished game.
+  const route = () => {
+    const h = location.hash;
+    if (h.startsWith('#/@')) return { screen: 'profile' as const, arg: decodeURIComponent(h.slice(3)) };
+    const g = /^#\/game\/(\d+)$/.exec(h);
+    if (g) return { screen: 'replay' as const, arg: g[1] };
+    return null;
+  };
+  const [screen, setScreenState] = useState<Screen>(() => route()?.screen ?? 'lobby');
+  const [routeArg, setRouteArg] = useState(() => route()?.arg ?? '');
   const setScreen = (sc: Screen) => {
     setScreenState(sc);
-    if (sc !== 'profile' && location.hash) history.replaceState(null, '', location.pathname + location.search);
+    if (sc !== 'profile' && sc !== 'replay' && location.hash) history.replaceState(null, '', location.pathname + location.search);
   };
   const openProfile = (u: string) => {
     location.hash = `/@${u}`;
   };
+  const openReplay = (id: number) => {
+    location.hash = `/game/${id}`;
+  };
+  const openAuth = (t: AuthTab) => {
+    setAuthTab(t);
+    setScreen('auth');
+  };
+  // Signing in (or up) from the auth page lands you back in the lobby.
+  useEffect(() => {
+    if (account.session) setScreenState((sc) => (sc === 'auth' ? 'lobby' : sc));
+  }, [account.session]);
   useEffect(() => {
     const onHash = () => {
-      if (location.hash.startsWith('#/@')) {
-        setProfileUser(decodeURIComponent(location.hash.slice(3)));
-        setScreenState('profile');
+      const r = route();
+      if (r) {
+        setRouteArg(r.arg);
+        setScreenState(r.screen);
       }
     };
     window.addEventListener('hashchange', onHash);
@@ -67,6 +94,7 @@ export default function App() {
   const [customOpen, setCustomOpen] = useState(false);
   const [customClock, setCustomClock] = useState(false);
   const [view, setView] = usePref<ViewMode>('chopstix.view', '2d');
+  const [chatPref, setChatPref] = usePref<'on' | 'off'>('chopstix.chat', 'on');
 
   const start = (c: GameConfig) => {
     sfx('start');
@@ -177,8 +205,128 @@ export default function App() {
     setConfig((c) => (c && c.mode === 'online' ? { ...c, remote } : c));
   }, [remote]);
 
+  // ---------- quick play (matched strangers, games run by the server) ----------
+  const [quickModePref, setQuickMode] = usePref<QuickMode>('chopstix.quickMode', 'classic');
+  const [quickClockPref, setQuickClockPref] = usePref<string>('chopstix.quickClock', '60');
+  const quickMode: QuickMode = quickModePref === 'street' ? 'street' : 'classic';
+  const quickClock = QUICK_CLOCKS.find((c) => String(c) === quickClockPref) ?? 60;
+  const setQuickClock = (c: number) => setQuickClockPref(String(c));
+  const [search, setSearch] = useState<{ since: number; error?: string } | null>(null);
+  const [now, setNow] = useState(Date.now());
+  const [unfinished, setUnfinished] = useState<MatchRow | null>(null);
+  const matchRef = useRef<MatchLink | null>(null);
+  const uid = account.session?.user.id;
+
+  const openQuick = useCallback((row: MatchRow) => {
+    matchRef.current?.close();
+    const link = openMatch(row, meRef.current.uid!);
+    matchRef.current = link;
+    setSearch(null);
+    setUnfinished(null);
+    // When both players ask for a rematch the server starts the next game; follow it there.
+    const off = link.subscribe((r) => {
+      if (!r.next_match) return;
+      off();
+      void getMatch(r.next_match).then(openQuick, () => {});
+    });
+    sfx('start');
+    setConfig({ mode: 'quick', rules: row.rules, clock: row.clock, mySide: link.mySide, match: link, account: accountCfg.current });
+    setGameKey((k) => k + 1);
+    setScreen('game');
+  }, []);
+
+  // ---------- friends, challenges and the daily puzzle ----------
+  const [friendsOpen, setFriendsOpen] = useState(false);
+  const [requests, setRequests] = useState(0);
+  const [incoming, setIncoming] = useState<Challenge[]>([]);
+  const [sent, setSent] = useState<{ id: string; to: string; note?: string } | null>(null);
+  const [daily, setDaily] = useState<Daily | null>(null);
+  const sentRef = useRef(sent);
+  sentRef.current = sent;
+
+  // Check in every few seconds while signed in: marks you online and brings challenges.
+  const beat = useCallback(async () => {
+    const hb = await heartbeat().catch(() => null);
+    if (!hb) return;
+    setRequests(hb.friend_requests);
+    setIncoming(hb.challenges);
+    const mine = sentRef.current;
+    if (mine && !mine.note && hb.sent?.id === mine.id) {
+      if (hb.sent.status === 'accepted' && hb.sent.match) {
+        setSent(null);
+        openQuick(hb.sent.match);
+      } else if (hb.sent.status !== 'pending') setSent({ ...mine, note: hb.sent.status === 'declined' ? `${mine.to} declined.` : `${mine.to} didn't answer.` });
+    }
+  }, [openQuick]);
+  useEffect(() => {
+    if (!uid) return;
+    void beat();
+    const id = window.setInterval(() => void beat(), sent && !sent.note ? 2500 : 10000);
+    return () => window.clearInterval(id);
+  }, [uid, beat, sent]);
+
+  const sendChallenge = (who: PlayerCard, mode: QuickMode, clock: number) =>
+    challengeFriend(who.id, mode, clock).then(
+      (id) => setSent({ id, to: who.display_name }),
+      (e: Error) => setSent({ id: '', to: who.display_name, note: e.message }),
+    );
+  const answer = (c: Challenge, accept: boolean) => {
+    setIncoming((xs) => xs.filter((x) => x.id !== c.id));
+    respondChallenge(c.id, accept).then(
+      (m) => m && openQuick(m),
+      (e: Error) => setSent({ id: '', to: c.from.display_name, note: e.message }),
+    );
+  };
+
+  useEffect(() => {
+    if (!accountsEnabled || screen !== 'lobby') return;
+    dailyPuzzle().then(setDaily, () => {});
+  }, [screen, uid]);
+
+  // After a reload or a dropped connection, offer to go back to a game that's still running.
+  useEffect(() => {
+    if (!uid || screen !== 'lobby') return;
+    let live = true;
+    currentMatch().then((r) => live && setUnfinished(r), () => {});
+    return () => void (live = false);
+  }, [uid, screen]);
+
+  useEffect(() => {
+    if (!search) return;
+    let live = true;
+    const poll = async () => {
+      try {
+        const res = await findMatch(quickMode, quickClock);
+        if (live && res.status === 'matched') openQuick(res.match);
+      } catch (e) {
+        if (live) setSearch((s) => s && { ...s, error: (e as Error).message });
+      }
+    };
+    void poll();
+    const id = window.setInterval(() => (setNow(Date.now()), void poll()), 2000);
+    const tick = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => {
+      live = false;
+      window.clearInterval(id);
+      window.clearInterval(tick);
+    };
+    // restarting the search when the options change is intended
+  }, [search?.since, quickMode, quickClock, openQuick]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const cancelSearch = () => {
+    setSearch(null);
+    void leaveQueue().catch(() => {});
+  };
+  useEffect(() => {
+    if (opp !== 'quick' && search) cancelSearch();
+  }, [opp]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const leaveGame = () => {
     if (config?.mode === 'online') cancelRoom();
+    if (config?.mode === 'quick') {
+      matchRef.current?.close();
+      matchRef.current = null;
+    }
     setScreen('lobby');
     setConfig(null);
   };
@@ -193,6 +341,7 @@ export default function App() {
   };
 
   const go = () => {
+    if (opp === 'quick') return search ? cancelSearch() : setSearch({ since: Date.now() });
     if (opp === 'bot') start({ mode: 'bot', rules, clock, mySide: pickSide(), bot, account: accountCfg.current });
     else if (opp === 'local') start({ mode: 'local', rules, clock, mySide: 0 });
     else if (net.status === 'connected' && net.role === 'host') sendStart(pickSide());
@@ -207,20 +356,24 @@ export default function App() {
   const stepIdx = Math.max(0, CLOCK_STEPS.findIndex((c) => c >= clock));
 
   if (account.loading) return null;
+  const invited = new URLSearchParams(location.search).has('room');
   if (!profile.onboarded && !account.session)
     return (
-      <Welcome
-        skin={profile.skin}
-        onDone={(name, skin) => {
+      <AuthPage
+        initial={invited || !accountsEnabled ? 'guest' : 'signup'}
+        invited={invited}
+        board={<DemoTable view="2d" skin={SKINS[profile.skin]} />}
+        guestSkin={profile.skin}
+        onGuest={(name, skin) => {
           sfx('start');
           setProfile({ ...profile, name, skin, onboarded: true });
           // an invited friend may already be connected: tell the host our real name
           linkRef.current?.send({ t: 'hello', name, rating: profile.rating, skin });
         }}
-        onAccount={accountsEnabled ? () => setAuthSheet('signin') : undefined}
-        authSheet={authSheet && <AuthSheet initial={authSheet} onClose={() => setAuthSheet(null)} />}
       />
     );
+  if (screen === 'auth' && !account.session)
+    return <AuthPage key={authTab} initial={authTab} board={<DemoTable view="2d" skin={SKINS[me.skin]} />} guestSkin={profile.skin} onBack={() => setScreen(config ? 'game' : 'lobby')} />;
 
   return (
     <div className="app">
@@ -229,11 +382,25 @@ export default function App() {
           ChopSti<em>X</em>
         </button>
         <nav className="topnav">
-          <button className={screen !== 'learn' ? 'on' : ''} onClick={() => screen === 'learn' && setScreen(config ? 'game' : 'lobby')}>
-            Play
+          <button className={screen === 'lobby' || screen === 'game' ? 'on' : ''} onClick={() => setScreen(config ? 'game' : 'lobby')}>
+            <Hand size={17} />
+            <span>Play</span>
           </button>
+          {accountsEnabled && (
+            <>
+              <button className={screen === 'puzzles' ? 'on' : ''} onClick={() => setScreen('puzzles')}>
+                <Puzzle size={17} />
+                <span>Puzzles</span>
+              </button>
+              <button className={screen === 'leaderboard' ? 'on' : ''} onClick={() => setScreen('leaderboard')}>
+                <Trophy size={17} />
+                <span>Leaderboard</span>
+              </button>
+            </>
+          )}
           <button className={screen === 'learn' ? 'on' : ''} onClick={() => setScreen('learn')}>
-            Learn
+            <GraduationCap size={17} />
+            <span>Learn</span>
           </button>
         </nav>
         <div className="top-right">
@@ -249,14 +416,25 @@ export default function App() {
                 {profile.rating}
               </span>
               {accountsEnabled && (
-                <button className="btn small" onClick={() => setAuthSheet('signup')}>
-                  Sign up
-                </button>
+                <>
+                  <button className="link-btn top-login" onClick={() => openAuth('login')}>
+                    Log in
+                  </button>
+                  <button className="btn small" onClick={() => openAuth('signup')}>
+                    Sign up
+                  </button>
+                </>
               )}
             </>
           )}
+          {ap && (
+            <button className="icon-btn has-count" aria-label={requests ? `Friends, ${requests} new requests` : 'Friends'} onClick={() => setFriendsOpen(true)}>
+              <UserRound size={19} />
+              {requests > 0 && <span className="count">{requests}</span>}
+            </button>
+          )}
           <button
-            className="icon-btn"
+            className="icon-btn top-mute"
             aria-label={muted ? 'Unmute' : 'Mute'}
             onClick={() => {
               setMuted(!muted);
@@ -273,7 +451,7 @@ export default function App() {
 
       <main className="main">
         {screen === 'game' && config && (
-          <Game key={gameKey} config={config} profile={me} setProfile={ap ? () => {} : setProfile} onRematch={rematch} onExit={leaveGame} />
+          <Game key={gameKey} config={config} profile={me} setProfile={ap ? () => {} : setProfile} onRematch={rematch} onExit={leaveGame} chatOn={chatPref === 'on'} />
         )}
 
         {screen === 'lobby' && (
@@ -287,6 +465,7 @@ export default function App() {
                 value={opp}
                 onChange={setOpp}
                 options={[
+                  ...(accountsEnabled ? [{ value: 'quick' as const, label: <span className="seg-ico"><Globe size={17} /> Online</span> }] : []),
                   { value: 'bot', label: <span className="seg-ico"><Bot size={17} /> Computer</span> },
                   { value: 'friend', label: <span className="seg-ico"><Link2 size={17} /> Friend</span> },
                   { value: 'local', label: <span className="seg-ico"><Users size={17} /> Local</span> },
@@ -325,7 +504,56 @@ export default function App() {
               {opp === 'friend' && net.role !== 'guest' && !hosting && <p className="card-note">Get a link to send. You play live as soon as they open it.</p>}
               {opp === 'local' && <p className="card-note">Two players, one screen. Take turns.</p>}
 
-              {opp === 'friend' && net.role === 'guest' ? (
+              {unfinished && (
+                <button className="notice resume" onClick={() => openQuick(unfinished)}>
+                  You have a game in progress against <b>{(unfinished.players?.find((p) => p.id !== uid) ?? unfinished.players?.[0])?.display_name}</b>. Return to it
+                </button>
+              )}
+
+              {opp === 'quick' ? (
+                !ap ? (
+                  <div className="guest-cta">
+                    <p className="card-note">Play rated games against people around your rating. You need an account so your rating follows you.</p>
+                    <button className="btn primary play-btn" onClick={() => openAuth('signup')}>
+                      Create an account
+                    </button>
+                    <button className="link-btn center" onClick={() => openAuth('login')}>
+                      I already have one
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {search ? (
+                      <div className="invite">
+                        <Lobby left={{ name: me.name, rating: me.rating, color: SKINS[me.skin], you: true }} right={null} />
+                        <p className="lobby-status">
+                          Finding an opponent near {me.rating} · {Math.floor(Math.max(0, now - search.since) / 1000)}s
+                        </p>
+                        {search.error && <div className="notice warn">{search.error}</div>}
+                      </div>
+                    ) : (
+                      <>
+                        <p className="card-note">Rated games against someone near your rating. The clock always runs.</p>
+                        <div className="opts">
+                          <Chips
+                            label="Rules"
+                            value={quickMode}
+                            onChange={setQuickMode}
+                            options={[
+                              { value: 'classic', label: 'Classic' },
+                              { value: 'street', label: 'Lunch Table' },
+                            ]}
+                          />
+                          <Chips label="Clock" value={quickClock} onChange={setQuickClock} options={QUICK_CLOCKS.map((c) => ({ value: c as number, label: clockLabel(c) }))} />
+                        </div>
+                      </>
+                    )}
+                    <button className={`btn play-btn ${search ? '' : 'primary'}`} onClick={go} disabled={!!unfinished}>
+                      {search ? 'Cancel' : 'Find opponent'}
+                    </button>
+                  </>
+                )
+              ) : opp === 'friend' && net.role === 'guest' ? (
                 <div className="invite">
                   <Lobby
                     left={net.status === 'connected' && net.named ? { name: net.oppName, rating: net.oppRating, color: SKINS[net.oppSkin ?? 3], host: true } : null}
@@ -437,11 +665,26 @@ export default function App() {
                 </>
               )}
             </section>
+            {daily && (
+              <button className="daily-cta" onClick={() => setScreen('puzzles')}>
+                <Puzzle size={20} />
+                <span>
+                  <b>Daily puzzle</b>
+                  <small>{daily.solved_today ? 'Solved today. See you tomorrow.' : `Win in ${daily.puzzle.moves}. Everyone gets the same one.`}</small>
+                </span>
+                <span className={`daily-streak ${daily.streak ? 'lit' : ''}`}>
+                  <Flame size={16} /> {daily.streak}
+                </span>
+              </button>
+            )}
           </div>
         )}
 
+        {screen === 'puzzles' && <Puzzles signedIn={!!ap} skin={me.skin} view={view} onView={setView} onSignUp={() => openAuth('signup')} onProgress={() => void account.refresh()} />}
+        {screen === 'leaderboard' && <Leaderboard me={uid ?? null} onOpen={openProfile} />}
+        {screen === 'replay' && <GameViewer key={routeArg} id={Number(routeArg)} view={view} onView={setView} onOpen={openProfile} />}
         {screen === 'learn' && <Learn skin={SKINS[me.skin]} onPlay={() => setScreen('lobby')} />}
-        {screen === 'profile' && (accountsEnabled ? <ProfilePage username={profileUser} account={account} onOpen={openProfile} /> : <div className="screen"><h1>Profiles need accounts, which aren't switched on yet.</h1></div>)}
+        {screen === 'profile' && (accountsEnabled ? <ProfilePage username={routeArg} account={account} onOpen={openProfile} onReplay={openReplay} onChallenge={sendChallenge} /> : <div className="screen"><h1>Profiles need accounts, which aren't switched on yet.</h1></div>)}
       </main>
 
       {sheet === 'settings' && (
@@ -485,17 +728,29 @@ export default function App() {
               ]}
             />
           </div>
+          <Switch
+            label="Sound"
+            on={!muted}
+            onChange={(v) => {
+              setMuted(!v);
+              setMute(!v);
+            }}
+          />
+          {accountsEnabled && <Switch label="Chat in online games" on={chatPref === 'on'} onChange={(v) => setChatPref(v ? 'on' : 'off')} />}
           {ap ? (
-            <button className="link-btn danger" onClick={() => (setSheet(null), void account.signOut())}>
-              Log out
-            </button>
+            <div className="account-actions">
+              <ChangePassword username={ap.username} />
+              <button className="link-btn danger" onClick={() => (setSheet(null), void account.signOut())}>
+                Log out
+              </button>
+            </div>
           ) : accountsEnabled ? (
             <div className="guest-cta">
               <p className="muted">You're playing as a guest. Your rating is saved on this device only.</p>
-              <button className="btn primary" onClick={() => (setSheet(null), setAuthSheet('signup'))}>
+              <button className="btn primary" onClick={() => (setSheet(null), openAuth('signup'))}>
                 Create an account
               </button>
-              <button className="link-btn center" onClick={() => (setSheet(null), setAuthSheet('signin'))}>
+              <button className="link-btn center" onClick={() => (setSheet(null), openAuth('login'))}>
                 I already have one
               </button>
             </div>
@@ -507,7 +762,50 @@ export default function App() {
         </Modal>
       )}
 
-      {authSheet && <AuthSheet initial={authSheet} defaultName={profile.onboarded ? profile.name : ''} onClose={() => setAuthSheet(null)} />}
+      {friendsOpen && <FriendsSheet onClose={() => setFriendsOpen(false)} onOpen={openProfile} onChallenge={sendChallenge} onChange={() => void beat()} />}
+
+      {(incoming.length > 0 || sent) && (
+        <div className="toasts" role="status">
+          {incoming.map((c) => (
+            <div className="toast" key={c.id}>
+              <Avatar name={c.from.display_name} color={SKINS[c.from.skin] ?? SKINS[1]} size={36} />
+              <span>
+                <b>{c.from.display_name}</b> challenges you
+                <small>
+                  {c.mode === 'street' ? 'Lunch Table' : 'Classic'} · {clockLabel(c.clock)} · rated
+                </small>
+              </span>
+              <button className="btn primary small" onClick={() => answer(c, true)}>
+                <Swords size={15} /> Play
+              </button>
+              <button className="icon-btn" aria-label="Decline" onClick={() => answer(c, false)}>
+                <X size={17} />
+              </button>
+            </div>
+          ))}
+          {sent && (
+            <div className="toast">
+              <span>
+                {sent.note ?? (
+                  <>
+                    Waiting for <b>{sent.to}</b> to accept…
+                  </>
+                )}
+              </span>
+              <button
+                className="icon-btn"
+                aria-label={sent.note ? 'Dismiss' : 'Cancel challenge'}
+                onClick={() => {
+                  if (!sent.note && sent.id) void cancelChallenge(sent.id);
+                  setSent(null);
+                }}
+              >
+                <X size={17} />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -543,61 +841,6 @@ function DemoTable({ view, skin }: { view: ViewMode; skin: string }) {
       onView={() => {}}
       onMove={() => {}}
     />
-  );
-}
-
-function Welcome({ skin: initialSkin, onDone, onAccount, authSheet }: { skin: number; onDone: (name: string, skin: number) => void; onAccount?: () => void; authSheet?: ReactNode }) {
-  const [name, setName] = useState('');
-  const [skin, setSkin] = useState(initialSkin);
-  const clean = name.trim().replace(/\s+/g, ' ');
-  const invited = new URLSearchParams(location.search).has('room');
-  return (
-    <div className="welcome">
-      <div className="welcome-board">
-        <DemoTable view="2d" skin={SKINS[skin]} />
-      </div>
-      <form
-        className="welcome-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (clean) onDone(clean, skin);
-        }}
-      >
-        <div className="welcome-mark">
-          ChopSti<em>X</em>
-        </div>
-        <h1 className="welcome-h">{invited ? 'You’ve been invited to a game.' : 'The finger game, played properly.'}</h1>
-        <p className="welcome-sub">{invited ? 'Pick a name and you’re in.' : 'Play bots, friends, or the person next to you.'}</p>
-
-        <div className="welcome-fields">
-          <label className="wf">
-            <span>Name</span>
-            <input id="name" className="text big" autoFocus autoComplete="nickname" maxLength={18} placeholder="What should we call you?" value={name} onChange={(e) => setName(e.target.value)} />
-          </label>
-          <div className="wf">
-            <span>Hands</span>
-            <div className="tones" role="radiogroup" aria-label="Hand tone">
-              {SKINS.map((s, i) => (
-                <button type="button" key={s} role="radio" aria-checked={skin === i} className={`tone ${skin === i ? 'on' : ''}`} style={{ background: s }} onClick={() => setSkin(i)} aria-label={`Hand tone ${i + 1}`} />
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <button className="btn primary play-btn" disabled={!clean}>
-          {invited ? 'Join game' : 'Start playing'}
-        </button>
-        <div className="welcome-foot">
-          <span>No account needed. Saved on this device.</span>
-          {onAccount && (
-            <button type="button" className="link-btn" onClick={onAccount}>
-              Log in
-            </button>
-          )}
-        </div>
-      </form>
-      {authSheet}
-    </div>
   );
 }
 

@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pencil } from 'lucide-react';
+import { Check, Flame, Pencil, Swords, UserPlus } from 'lucide-react';
 import { Avatar, Modal } from '../components/ui';
 import { BOTS } from '../game/bots';
 import { ratingTitle } from '../game/rating';
 import { SKINS } from '../game/profile';
 import { supabase, type AccountProfile, type GameRow } from './supabase';
 import type { Account } from './useAccount';
+import { BADGES } from '../game/badges';
+import { friendRequest, friendsList, playerBadges, type Friend } from '../net/social';
+import { ChallengePicker, type ChallengeFn } from './Friends';
 
 interface Row {
   id: number;
@@ -19,10 +22,26 @@ interface Row {
   moves: number;
 }
 
-export function ProfilePage({ username, account, onOpen }: { username: string; account: Account; onOpen: (u: string) => void }) {
+export function ProfilePage({
+  username,
+  account,
+  onOpen,
+  onReplay,
+  onChallenge,
+}: {
+  username: string;
+  account: Account;
+  onOpen: (u: string) => void;
+  onReplay: (id: number) => void;
+  onChallenge: ChallengeFn;
+}) {
   const [p, setP] = useState<AccountProfile | null | undefined>(undefined);
   const [rows, setRows] = useState<Row[]>([]);
   const [editing, setEditing] = useState(false);
+  const [shown, setShown] = useState(20);
+  const [badges, setBadges] = useState<string[]>([]);
+  const [friend, setFriend] = useState<Friend['status'] | 'none' | null>(null);
+  const [picking, setPicking] = useState(false);
   const mine = account.profile?.username.toLowerCase() === username.toLowerCase();
 
   useEffect(() => {
@@ -33,12 +52,15 @@ export function ProfilePage({ username, account, onOpen }: { username: string; a
       if (!on) return;
       setP(prof as AccountProfile | null);
       if (!prof) return;
+      playerBadges(prof.id).then((b) => on && setBadges(b), () => {});
+      if (account.profile && account.profile.id !== prof.id)
+        friendsList().then((fs) => on && setFriend(fs.find((f) => f.id === prof.id)?.status ?? 'none'), () => {});
       const { data: games } = await supabase
         .from('games')
         .select('*')
         .or(`player_a.eq.${prof.id},player_b.eq.${prof.id}`)
         .order('created_at', { ascending: false })
-        .limit(60);
+        .limit(200);
       const list = (games ?? []) as GameRow[];
       const oppIds = [...new Set(list.map((g) => (g.player_a === prof.id ? g.player_b : g.player_a)).filter(Boolean))] as string[];
       const { data: opps } = oppIds.length ? await supabase.from('profiles').select('id, username, display_name').in('id', oppIds) : { data: [] };
@@ -68,7 +90,7 @@ export function ProfilePage({ username, account, onOpen }: { username: string; a
     return () => {
       on = false;
     };
-  }, [username, account.profile?.rating]);
+  }, [username, account.profile?.rating]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const history = useMemo(() => [...rows].reverse().map((r) => r.after), [rows]);
 
@@ -96,7 +118,28 @@ export function ProfilePage({ username, account, onOpen }: { username: string; a
             <Pencil size={16} /> Edit
           </button>
         )}
+        {!mine && friend && (
+          <div className="pf-social">
+            {friend === 'friends' ? (
+              <>
+                <span className="pf-friends">
+                  <Check size={15} /> Friends
+                </span>
+                <button className="btn primary" onClick={() => setPicking((x) => !x)}>
+                  <Swords size={16} /> Challenge
+                </button>
+              </>
+            ) : friend === 'outgoing' ? (
+              <span className="pf-friends">Request sent</span>
+            ) : (
+              <button className="btn" onClick={() => friendRequest(p.id).then(setFriend, () => {})}>
+                <UserPlus size={16} /> {friend === 'incoming' ? 'Accept friend request' : 'Add friend'}
+              </button>
+            )}
+          </div>
+        )}
       </header>
+      {picking && <ChallengePicker who={p} onSend={onChallenge} onClose={() => setPicking(false)} />}
 
       <section className="pf-grid">
         <div className="pf-card rating-card">
@@ -134,15 +177,54 @@ export function ProfilePage({ username, account, onOpen }: { username: string; a
         </div>
       </section>
 
+      <section className="pf-grid">
+        <div className="pf-card">
+          <span className="pf-label">Puzzles</span>
+          <div className="pf-record">
+            <div>
+              <b>{p.puzzle_rating ?? 800}</b>
+              <span>Rating</span>
+            </div>
+            <div>
+              <b>{p.puzzles_solved ?? 0}</b>
+              <span>Solved</span>
+            </div>
+            <div>
+              <b className="pf-flame">
+                <Flame size={18} /> {liveStreak(p)}
+              </b>
+              <span>Day streak</span>
+            </div>
+          </div>
+          <span className="muted">Best streak {p.best_daily_streak ?? 0} days</span>
+        </div>
+        <div className="pf-card">
+          <span className="pf-label">
+            Badges · {badges.length}/{BADGES.length}
+          </span>
+          <div className="badges">
+            {BADGES.map((b) => {
+              const got = badges.includes(b.id);
+              return (
+                <span key={b.id} className={`badge ${got ? 'got' : ''}`} title={`${b.name}: ${b.blurb}${got ? '' : ' (locked)'}`}>
+                  <i>{b.icon}</i>
+                </span>
+              );
+            })}
+          </div>
+          <span className="muted">{badges.length ? BADGES.filter((b) => badges.includes(b.id)).map((b) => b.name).slice(-3).join(' · ') : 'Hover a badge to see how to earn it.'}</span>
+        </div>
+      </section>
+
       <section className="pf-card">
         <span className="pf-label">Recent games</span>
         {rows.length === 0 && <p className="muted">Rated games will show up here.</p>}
         <div className="pf-games">
-          {rows.slice(0, 20).map((r) => (
-            <div className="pf-game" key={r.id}>
+          {rows.slice(0, shown).map((r) => (
+            <div className="pf-game" key={r.id} role="button" tabIndex={0} title="Replay this game" onClick={() => onReplay(r.id)} onKeyDown={(e) => e.key === 'Enter' && onReplay(r.id)}>
               <span className={`res ${r.result}`}>{r.result === 'win' ? 'W' : r.result === 'loss' ? 'L' : 'D'}</span>
               {r.oppUser ? (
-                <button className="pf-opp link" onClick={() => onOpen(r.oppUser!)}>
+                <button className="pf-opp link" onClick={(e) => (e.stopPropagation(), onOpen(r.oppUser!))}>
                   {r.opp}
                 </button>
               ) : (
@@ -159,6 +241,11 @@ export function ProfilePage({ username, account, onOpen }: { username: string; a
             </div>
           ))}
         </div>
+        {rows.length > shown && (
+          <button className="link-btn center" onClick={() => setShown((n) => n + 20)}>
+            Show more ({rows.length - shown} older)
+          </button>
+        )}
       </section>
 
       {editing && account.profile && <EditProfile account={account} onClose={() => setEditing(false)} onSaved={(np) => setP({ ...p, ...np })} />}
@@ -220,4 +307,11 @@ function Spark({ values }: { values: number[] }) {
       </defs>
     </svg>
   );
+}
+
+/** A daily streak only counts if the last solve was today or yesterday (UTC, like the server). */
+function liveStreak(p: AccountProfile) {
+  if (!p.last_daily) return 0;
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  return p.last_daily >= yesterday ? p.daily_streak : 0;
 }

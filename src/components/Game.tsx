@@ -10,6 +10,10 @@ import { SKINS, type Profile } from '../game/profile';
 import { ratingChange } from '../game/rating';
 import { supabase, type RatedResult } from '../account/supabase';
 import type { NetMsg } from '../net/online';
+import type { MatchLink, MatchRow } from '../net/match';
+import { sendChat, watchChat, type ChatRow } from '../net/social';
+import { cleanChat } from '../game/chat';
+import { Chat, type ChatLine } from './Chat';
 import { sfx } from '../sound';
 
 export interface Remote {
@@ -22,19 +26,20 @@ export interface Remote {
 }
 
 export interface GameConfig {
-  mode: 'bot' | 'local' | 'online';
+  mode: 'bot' | 'local' | 'online' | 'quick'; // online = friend link, quick = matched stranger (server-run)
   rules: Rules;
   clock: number; // seconds per player, 0 = untimed
   mySide: Side; // which side the local player controls (bot/online)
   bot?: Bot;
   remote?: Remote;
+  match?: MatchLink;
   /** Signed-in player: games are rated on the server instead of locally. */
   account?: { onRated: () => void };
   /** Shared id for a friend game, the same on both screens. */
   gameKey?: string;
 }
 
-type Reason = 'knockout' | 'resignation' | 'time' | 'repetition' | 'abandonment';
+type Reason = 'knockout' | 'resignation' | 'time' | 'repetition' | 'abandonment' | 'aborted';
 interface Result {
   winner: Side | null;
   reason: Reason;
@@ -45,6 +50,15 @@ const REASON_TEXT: Record<Reason, string> = {
   time: 'on time',
   repetition: 'by repetition',
   abandonment: 'by abandonment',
+  aborted: 'before both players moved',
+};
+
+const statesFrom = (rules: Rules, moves: Move[]) => moves.reduce<State[]>((acc, m) => [...acc, applyMove(rules, acc[acc.length - 1], m)], [initialState()]);
+/** Clocks as of now: the side to move has been thinking for elapsed_ms (clocks start after each side's first move). */
+const clocksOf = (r: MatchRow): [number, number] => {
+  const running = r.status === 'active' && r.moves.length >= 2 ? r.moves.length % 2 : -1;
+  const el = r.elapsed_ms ?? 0;
+  return [r.clock_a_ms - (running === 0 ? el : 0), r.clock_b_ms - (running === 1 ? el : 0)];
 };
 
 const darken = (hex: string) => {
@@ -65,23 +79,27 @@ export function Game({
   setProfile,
   onRematch,
   onExit,
+  chatOn = true,
 }: {
+  chatOn?: boolean;
   config: GameConfig;
   profile: Profile;
   setProfile: (p: Profile) => void;
   onRematch: () => void;
   onExit: () => void;
 }) {
-  const { rules, mode, bot, remote } = config;
-  const [states, setStates] = useState<State[]>(() => [initialState()]);
-  const [moves, setMoves] = useState<Move[]>([]);
-  const [view, setView] = useState(0);
+  const { rules, mode, bot, remote, match } = config;
+  const quick = mode === 'quick';
+  const net = mode === 'online' || quick;
+  const [states, setStates] = useState<State[]>(() => statesFrom(rules, match?.initial.moves ?? []));
+  const [moves, setMoves] = useState<Move[]>(() => match?.initial.moves ?? []);
+  const [view, setView] = useState(() => match?.initial.moves.length ?? 0);
   const [result, setResult] = useState<Result | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [review, setReview] = useState<{ grades: Grade[]; accuracy: [number, number] } | null>(null);
   const [showEval, setShowEval] = useState(false);
   const [hint, setHint] = useState<Move | null>(null);
-  const [clocks, setClocks] = useState<[number, number]>([config.clock * 1000, config.clock * 1000]);
+  const [clocks, setClocks] = useState<[number, number]>(() => (match ? clocksOf(match.initial) : [config.clock * 1000, config.clock * 1000]));
   const [delta, setDelta] = useState<number | null>(null);
   const [rematchAsked, setRematchAsked] = useState({ me: false, them: false });
   const [flipped, setFlipped] = useState(false);
@@ -135,7 +153,7 @@ export function Game({
   const [ratingNote, setRatingNote] = useState<string | null>(null);
   const startedAt = useRef(Date.now());
   const [duration, setDuration] = useState(0);
-  const movesRef = useRef<Move[]>([]);
+  const movesRef = useRef<Move[]>(match?.initial.moves ?? []);
   const profileRef = useRef(profile);
   profileRef.current = profile;
 
@@ -153,8 +171,10 @@ export function Game({
           const score: 0 | 0.5 | 1 = r.winner === null ? 0.5 : r.winner === meSide ? 1 : 0;
           sfx(score === 1 ? 'win' : 'lose');
           const p = profileRef.current;
-          const oppRating = mode === 'bot' ? bot!.rating : remote!.oppRating;
-          if (config.account && supabase) void rateOnServer(r);
+          const oppRating = mode === 'bot' ? bot!.rating : quick ? match!.opp.rating : remote!.oppRating;
+          if (quick) {
+            /* the server rated it: see the match sync below */
+          } else if (config.account && supabase) void rateOnServer(r);
           else {
             const d = ratingChange(p.rating, oppRating, score, p.wins + p.losses + p.draws);
             setDelta(d);
@@ -165,7 +185,7 @@ export function Game({
               losses: p.losses + (score === 0 ? 1 : 0),
               draws: p.draws + (score === 0.5 ? 1 : 0),
               history: [
-                { opp: mode === 'bot' ? bot!.name : remote!.oppName, result: (score === 1 ? 'win' : score === 0 ? 'loss' : 'draw') as 'win' | 'loss' | 'draw', delta: d, at: Date.now() },
+                { opp: mode === 'bot' ? bot!.name : quick ? match!.opp.display_name : remote!.oppName, result: (score === 1 ? 'win' : score === 0 ? 'loss' : 'draw') as 'win' | 'loss' | 'draw', delta: d, at: Date.now() },
                 ...p.history,
               ].slice(0, 30),
             });
@@ -176,7 +196,7 @@ export function Game({
         window.setTimeout(() => setShowModal(true), 450);
       }, settle);
     },
-    [bot, config.mySide, mode, remote, rules, setProfile],
+    [bot, config.mySide, match, mode, quick, remote, rules, setProfile],
   );
 
   // Rated games for signed-in players are scored by the database, which replays the moves.
@@ -229,13 +249,71 @@ export function Game({
       setView(newStates.length - 1);
       setHint(null);
       if (!fromRemote && mode === 'online') remote!.send({ t: 'move', move: m, ply: moves.length, clockLeft: clocks[s.turn] });
+      // The server ends quick-play games itself; we just show the move straight away.
+      if (quick) {
+        if (!fromRemote) void match!.move(moves.length, m).then((ok) => ok || syncRef.current(match!.latest(), true));
+        return;
+      }
       const w = winner(next);
       if (w !== null) return finish({ winner: w, reason: 'knockout' });
       const key = positionKey(next);
       if (newStates.filter((x) => positionKey(x) === key).length >= 3) finish({ winner: null, reason: 'repetition' });
     },
-    [clocks, finish, live, mode, moves.length, remote, result, rules, states],
+    [clocks, finish, live, match, mode, moves.length, quick, remote, result, rules, states],
   );
+
+  // Quick play: the server's copy of the game wins. Catch up on the other side's moves, clocks, result and rating.
+  const syncRef = useRef((_r: MatchRow, _force?: boolean) => {});
+  syncRef.current = (r: MatchRow, force = false) => {
+    const local = movesRef.current;
+    const ahead = r.moves.length > local.length;
+    const differs = r.moves.length === local.length && JSON.stringify(r.moves) !== JSON.stringify(local);
+    // A shorter server list is normally just our own move still on its way, unless the server refused it.
+    if (ahead || differs || (force && r.moves.length !== local.length)) {
+      const st = statesFrom(rules, r.moves);
+      movesRef.current = r.moves;
+      setMoves(r.moves);
+      setStates(st);
+      setView(st.length - 1);
+      setHint(null);
+    }
+    setClocks(clocksOf(r));
+    lastMoveAt.current = Date.now() - (r.elapsed_ms ?? 0);
+    const mine = config.mySide === 0 ? r.rematch_a : r.rematch_b;
+    const theirs = config.mySide === 0 ? r.rematch_b : r.rematch_a;
+    setRematchAsked({ me: mine, them: theirs });
+    if (r.status !== 'active') {
+      const before = config.mySide === 0 ? r.a_before : r.b_before;
+      const d = config.mySide === 0 ? r.a_delta : r.b_delta;
+      if (before !== null && d !== null && !ratedRef.current) {
+        ratedRef.current = true;
+        setOldRating(before);
+        setDelta(d);
+        config.account?.onRated();
+      }
+      finish({ winner: r.winner, reason: r.reason ?? 'aborted' });
+    }
+  };
+  const ratedRef = useRef(false);
+  const lastMoveAt = useRef(Date.now() - (match?.initial.elapsed_ms ?? 0));
+  useEffect(() => {
+    if (!match) return;
+    syncRef.current(match.latest());
+    return match.subscribe((r) => syncRef.current(r));
+  }, [match]);
+
+  // Quick play: if a clock runs out (or nobody starts), ask the server to call it.
+  useEffect(() => {
+    if (!quick || result) return;
+    const id = window.setInterval(() => {
+      const flagged = clocksRef.current.some((c) => c <= 0) && movesRef.current.length >= 2;
+      const unstarted = movesRef.current.length < 2 && Date.now() - lastMoveAt.current > 30500;
+      if (flagged || unstarted) match!.claimTimeout();
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [match, quick, result]);
+  const clocksRef = useRef(clocks);
+  clocksRef.current = clocks;
 
   // Bot turn.
   useEffect(() => {
@@ -256,6 +334,7 @@ export function Game({
       }
       if (msg.t === 'resign') finish({ winner: config.mySide, reason: 'resignation' });
       if (msg.t === 'rematch') setRematchAsked((r) => ({ ...r, them: true }));
+      if (msg.t === 'chat') addLines([{ id: `p${Date.now()}${Math.random()}`, mine: false, body: cleanChat(msg.text) }]);
     });
   }, [config.clock, config.mySide, finish, remote]);
 
@@ -264,8 +343,8 @@ export function Game({
   }, [config.mySide, finish, moves.length, remote, result]);
 
   useEffect(() => {
-    if (rematchAsked.me && rematchAsked.them) onRematch();
-  }, [onRematch, rematchAsked]);
+    if (!quick && rematchAsked.me && rematchAsked.them) onRematch(); // quick play: the app opens the server's rematch
+  }, [onRematch, quick, rematchAsked]);
 
   // Clocks start after each side's first move, like chess.com.
   useEffect(() => {
@@ -285,13 +364,13 @@ export function Game({
   }, [config.clock, live.turn, moves.length, result]);
 
   useEffect(() => {
-    if (!config.clock || result) return;
+    if (!config.clock || result || quick) return;
     const flagged = clocks.findIndex((c) => c <= 0);
     if (flagged >= 0 && (mode !== 'online' || flagged === config.mySide)) {
       finish({ winner: other(flagged as Side), reason: 'time' });
       if (mode === 'online') remote!.send({ t: 'resign' });
     }
-  }, [clocks, config.clock, config.mySide, finish, mode, remote, result]);
+  }, [clocks, config.clock, config.mySide, finish, mode, quick, remote, result]);
 
   // Arrow keys walk through history.
   useEffect(() => {
@@ -305,12 +384,41 @@ export function Game({
 
   const resign = () => {
     if (result) return;
+    if (quick) return match!.resign(); // the server decides: resign, or call it off before both sides have moved
     const loser = mode === 'local' ? live.turn : config.mySide;
     if (mode === 'online') remote!.send({ t: 'resign' });
     finish({ winner: other(loser), reason: 'resignation' });
   };
 
+  // ---------- chat (friend links over the peer connection, quick play through the server)
+  const [chat, setChat] = useState<ChatLine[]>([]);
+  const [chatError, setChatError] = useState<string | null>(null);
+  function addLines(ls: ChatLine[]) {
+    setChat((prev) => {
+      const ids = new Set(prev.map((l) => l.id));
+      const fresh = ls.filter((l) => !ids.has(l.id));
+      return fresh.length ? [...prev, ...fresh].slice(-100) : prev;
+    });
+  }
+  const myId = match ? (match.mySide === 0 ? match.initial.player_a : match.initial.player_b) : null;
+  useEffect(() => {
+    if (!match || !chatOn) return;
+    return watchChat(match.id, (rows: ChatRow[]) => addLines(rows.map((r) => ({ id: r.id, mine: r.sender === myId, body: r.body }))));
+  }, [chatOn, match, myId]);
+  const sayChat = (text: string) => {
+    setChatError(null);
+    if (quick)
+      return void sendChat(match!.id, text).then(
+        (r) => addLines([{ id: r.id, mine: true, body: r.body }]),
+        (e: Error) => setChatError(e.message),
+      );
+    const body = cleanChat(text);
+    remote!.send({ t: 'chat', text: body });
+    addLines([{ id: `m${Date.now()}`, mine: true, body }]);
+  };
+
   const rematch = () => {
+    if (quick) return (match!.rematch(), setRematchAsked((r) => ({ ...r, me: true })));
     if (mode !== 'online') return onRematch();
     remote!.send({ t: 'rematch' });
     setRematchAsked((r) => ({ ...r, me: true }));
@@ -346,6 +454,7 @@ export function Game({
 
   const ev = useMemo(() => evalBar(rules, viewing), [rules, viewing]);
 
+  const oppName = quick ? match!.opp.display_name : remote?.oppName ?? '';
   const names: [string, string] =
     mode === 'local'
       ? ['Player 1', 'Player 2']
@@ -354,9 +463,10 @@ export function Game({
           ? [profile.name, bot!.name]
           : [bot!.name, profile.name]
         : config.mySide === 0
-          ? [profile.name, remote!.oppName]
-          : [remote!.oppName, profile.name];
-  const oppSkin = SKINS[(profile.skin + 2) % SKINS.length];
+          ? [profile.name, oppName]
+          : [oppName, profile.name];
+  // A matched stranger brings their own hands; otherwise pick a tone that contrasts with yours.
+  const oppSkin = quick && match!.opp.skin !== profile.skin ? SKINS[match!.opp.skin] : SKINS[(profile.skin + 2) % SKINS.length];
   const skins: [string, string] =
     mode === 'local' ? [SKINS[profile.skin], oppSkin] : config.mySide === 0 ? [SKINS[profile.skin], oppSkin] : [oppSkin, SKINS[profile.skin]];
   const MY_SLEEVE = '#ecebe6';
@@ -364,7 +474,7 @@ export function Game({
   const sleeves: [string, string] = mode === 'local' || config.mySide === 0 ? [MY_SLEEVE, oppSleeve] : [oppSleeve, MY_SLEEVE];
 
   const isBotSide = (s: Side) => mode === 'bot' && s !== config.mySide;
-  const ratingOf = (s: Side) => (mode === 'local' ? null : isBotSide(s) ? bot!.rating : s === config.mySide ? profile.rating : remote!.oppRating);
+  const ratingOf = (s: Side) => (mode === 'local' ? null : isBotSide(s) ? bot!.rating : s === config.mySide ? profile.rating : quick ? match!.opp.rating : remote!.oppRating);
   const colorOf = (s: Side) => (isBotSide(s) ? bot!.color : skins[s]);
 
   const playerBar = (side: Side) => {
@@ -401,7 +511,7 @@ export function Game({
     );
 
   const meWon = result && result.winner !== null && (mode === 'local' || result.winner === config.mySide);
-  const title = !result ? '' : result.winner === null ? 'Draw' : mode === 'local' ? `${names[result.winner]} wins` : meWon ? 'You won' : 'You lost';
+  const title = !result ? '' : result.reason === 'aborted' ? 'Game aborted' : result.winner === null ? 'Draw' : mode === 'local' ? `${names[result.winner]} wins` : meWon ? 'You won' : 'You lost';
   const timeLabel = config.clock ? clockLabel(config.clock) : null;
   const status = result ? null : canAct ? (mode === 'local' ? `${names[live.turn]} to move` : 'Your move') : mode === 'bot' ? `${bot!.name} is thinking…` : `${names[live.turn]} to move`;
   const mins = Math.floor(duration / 60000);
@@ -521,7 +631,7 @@ export function Game({
         <div className="actions" key={revealed ? 'post' : 'live'}>
           {!revealed ? (
             <>
-              {mode !== 'online' && (
+              {!net && (
                 <button className="tool" title="Hint" aria-label="Hint" disabled={!canAct} onClick={() => setHint(rankedMoves(rules, live)[0].move)}>
                   <Lightbulb size={18} />
                 </button>
@@ -529,9 +639,11 @@ export function Game({
               <button className="tool" title="Switch seat" aria-label="Switch seat" onClick={() => setFlipped((f) => !f)}>
                 <ArrowUpDown size={18} />
               </button>
-              <button className={`tool ${showEval ? 'on' : ''}`} title="Evaluation bar" aria-label="Evaluation bar" onClick={() => setShowEval((s) => !s)}>
-                <BarChart3 size={18} />
-              </button>
+              {!quick && (
+                <button className={`tool ${showEval ? 'on' : ''}`} title="Evaluation bar" aria-label="Evaluation bar" onClick={() => setShowEval((s) => !s)}>
+                  <BarChart3 size={18} />
+                </button>
+              )}
               <button className="tool danger" title="Resign" aria-label="Resign" onClick={resign} disabled={!!result}>
                 <Flag size={18} />
               </button>
@@ -547,8 +659,9 @@ export function Game({
             </div>
           )}
         </div>
-        {rematchAsked.them && !rematchAsked.me && <div className="notice">{remote?.oppName} wants a rematch</div>}
+        {rematchAsked.them && !rematchAsked.me && <div className="notice">{oppName} wants a rematch</div>}
         {remote && !remote.connected && <div className="notice warn">Opponent disconnected</div>}
+        {net && chatOn && <Chat lines={chat} oppName={oppName} onSend={sayChat} error={chatError} />}
       </aside>
 
       {result && revealed && showModal && (
@@ -569,7 +682,7 @@ export function Game({
               </div>
             ))}
             <div className="vs-score">
-              {result.winner === null ? '½ – ½' : `${result.winner === (config.mode === 'local' ? 0 : config.mySide) ? 1 : 0} – ${result.winner === (config.mode === 'local' ? 0 : config.mySide) ? 0 : 1}`}
+              {result.reason === 'aborted' ? '–' : result.winner === null ? '½ – ½' : `${result.winner === (config.mode === 'local' ? 0 : config.mySide) ? 1 : 0} – ${result.winner === (config.mode === 'local' ? 0 : config.mySide) ? 0 : 1}`}
             </div>
           </div>
           {delta !== null && (
@@ -605,7 +718,7 @@ export function Game({
 }
 
 const H = ['L', 'R'];
-function moveText(m: Move) {
+export function moveText(m: Move) {
   if (m.kind === 'attack') return `${H[m.from]} → ${H[m.to]}`;
   if (m.kind === 'self') return `${H[m.from]} → own ${H[1 - m.from]}`;
   return `Split ${m.to[0]}·${m.to[1]}`;
