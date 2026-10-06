@@ -107,7 +107,7 @@ export function GameViewer({ id, view, onView, onOpen }: { id: number; view: Vie
             {GRADE_META[review.grades[i]].icon}
           </span>
         )}
-        {moveText(moves[i])}
+        {moveText(moves[i], states[i])}
       </button>
     ) : (
       <span />

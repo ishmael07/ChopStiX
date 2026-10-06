@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, Maximize2, Minimize2, Video, X, ArrowLeftRight } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Maximize2, Minimize2, Video, X, ArrowLeftRight, Repeat } from 'lucide-react';
 import { HandImage } from './Hand';
 import { legalMoves, other, splitOptions, type Hands, type Move, type Rules, type Side, type State } from '../game/rules';
 import type { CameraMode, HandFlags, HandKey, Motion, Scene3D } from '../three/scene3d';
@@ -112,6 +112,8 @@ export function Table({ state, rules, bottom, canAct, lastMove, ply, skins, slee
   const splits = canAct ? splitOptions(rules, state.hands[me]) : [];
   const has = (m: Move) => moves.some((x) => JSON.stringify(x) === JSON.stringify(m));
   const cur = state.hands[me];
+  const canSwap = splits.some((s) => s[0] === cur[0] && s[1] === cur[1]);
+  const realSplits = splits.length - (canSwap ? 1 : 0);
   const legalTransfer = transfer !== null && splits.some((s) => s[0] === transfer[0] && s[1] === transfer[1]);
 
   function startTransfer(from?: 0 | 1) {
@@ -257,10 +259,19 @@ export function Table({ state, rules, bottom, canAct, lastMove, ply, skins, slee
               </button>
             </div>
           ) : (
-            splits.length > 0 && (
-              <button className="dock-btn" onClick={() => startTransfer()}>
-                <ArrowLeftRight size={16} /> Split
-              </button>
+            (realSplits > 0 || canSwap) && (
+              <div className="dock-row">
+                {realSplits > 0 && (
+                  <button className="dock-btn" onClick={() => startTransfer()}>
+                    <ArrowLeftRight size={16} /> Split
+                  </button>
+                )}
+                {canSwap && (
+                  <button className="dock-btn" onClick={() => onMove({ kind: 'split', to: [...cur] as Hands })} title="Swap your matching hands. Repeating a position three times is a draw.">
+                    <Repeat size={16} /> Swap
+                  </button>
+                )}
+              </div>
             )
           )}
         </div>

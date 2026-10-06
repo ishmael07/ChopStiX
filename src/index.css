@@ -819,3 +819,20 @@ button.board-row:hover { background: var(--surface-2); }
 }
 @media (max-width: 480px) { .top-mute { display: none; } }
 @media (max-width: 600px) { .me-chip { padding: 0 6px; gap: 0; } }
+
+/* ---------- game: a bigger table, and a side panel that never outgrows it ---------- */
+.main:has(> .game:not(.focus)) { padding-top: 14px; padding-bottom: 14px; }
+.game .board-col { width: min(760px, calc((100dvh - 190px) * 0.98), calc(100vw - 290px - 20px - 56px)); gap: 8px; }
+.game .player-bar { height: 40px; }
+/* contain: size keeps the move list from stretching the row; the panel just fills the table's height and scrolls. */
+.game .panel { contain: size; margin: 48px 0; }
+.mv { min-width: 0; }
+.mv-time { margin-left: 2px; color: var(--faint); font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.dock-row { display: flex; gap: 8px; }
+@media (max-width: 1040px) {
+  .game .board-col { width: 100%; }
+  .game .panel { contain: none; margin: 0; }
+}
+.custom-note { margin: 0 0 6px; font-size: 13px; line-height: 1.45; color: var(--faint); }
+.panel-top .game-time { margin-left: auto; color: var(--faint); font-size: 13px; font-variant-numeric: tabular-nums; }
+.panel-top .game-time + .icon-btn { margin-left: 2px; }

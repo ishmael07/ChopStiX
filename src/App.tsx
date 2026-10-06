@@ -585,6 +585,8 @@ export default function App() {
                         <Switch label="Flip 3-1 → 1-3" on={rules.mirror} disabled={!rules.splits} onChange={(v) => setRules({ ...rules, mirror: v })} />
                         <Switch label="Empty a hand" on={rules.suicide} disabled={!rules.splits} onChange={(v) => setRules({ ...rules, suicide: v })} />
                         <Switch label="Tap your own hand" on={rules.selfTap} onChange={(v) => setRules({ ...rules, selfTap: v })} />
+                        <Switch label="Swap matching hands 3-3 → 3-3" on={!!rules.swap} disabled={!rules.splits} onChange={(v) => setRules({ ...rules, swap: v })} />
+                        {rules.swap && rules.splits && <p className="custom-note">A swap uses your turn. Repeat the same position three times and the game is a draw.</p>}
                       </div>
                     )}
                     <Chips

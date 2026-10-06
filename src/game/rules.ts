@@ -10,6 +10,7 @@ export interface Rules {
   suicide: boolean; // a split may empty one of your hands (1-1 -> 0-2)
   mirror: boolean; // a split may just flip your hands (3-1 -> 1-3)
   selfTap: boolean; // you may tap your own other hand
+  swap?: boolean; // matching hands may swap places (3-3 -> 3-3), a turn spent; threefold repetition still ends it
 }
 
 export const CLASSIC: Rules = { overflow: 'cutoff', splits: true, revive: true, suicide: false, mirror: false, selfTap: false };
@@ -34,7 +35,7 @@ export const MODES: Record<Exclude<ModeId, 'custom'>, { name: string; tagline: s
 
 export const modeOf = (r: Rules): ModeId =>
   sameRules(r, CLASSIC) ? 'classic' : sameRules(r, STREET) ? 'street' : 'custom';
-const sameRules = (a: Rules, b: Rules) => (Object.keys(b) as (keyof Rules)[]).every((k) => a[k] === b[k]);
+const sameRules = (a: Rules, b: Rules) => ([...Object.keys(a), ...Object.keys(b)] as (keyof Rules)[]).every((k) => (a[k] ?? false) === (b[k] ?? false));
 
 export interface State {
   hands: [Hands, Hands];
@@ -77,8 +78,8 @@ export function splitOptions(rules: Rules, h: Hands): Hands[] {
   for (let l = 0; l <= 4; l++) {
     const r = total - l;
     if (r < 0 || r > 4) continue;
-    if (l === h[0] && r === h[1]) continue; // no-op
-    if (!rules.mirror && l === h[1] && r === h[0]) continue; // mere flip
+    if (l === h[0] && r === h[1] && !(rules.swap && l === r && l > 0)) continue; // no-op, unless swapping matching hands
+    if (!rules.mirror && l === h[1] && r === h[0] && l !== r) continue; // mere flip
     if (!rules.suicide && (l === 0 || r === 0)) continue;
     if (!rules.revive && ((h[0] === 0 && l > 0) || (h[1] === 0 && r > 0))) continue;
     out.push([l, r]);
@@ -113,10 +114,13 @@ export function applyMove(rules: Rules, s: State, m: Move): State {
   return { hands, turn: opp };
 }
 
+/** A swap of matching hands: a split that leaves the counts as they were. */
+export const isSwap = (s: State, m: Move) => m.kind === 'split' && m.to[0] === s.hands[s.turn][0] && m.to[1] === s.hands[s.turn][1];
+
 export const sameMove = (a: Move, b: Move) => JSON.stringify(a) === JSON.stringify(b);
 
 const H = ['L', 'R'];
-/** Notation: "LxR" = my left taps their right. "L+R" = my left taps my right. "S2·3" = split to 2|3. */
+/** Notation: "LxR" = my left taps their right. "L+R" = my left taps my right. "S2·3" = split to 2|3 (a swap of matching hands reads "S3·3"). */
 export function notate(m: Move): string {
   if (m.kind === 'attack') return `${H[m.from]}x${H[m.to]}`;
   if (m.kind === 'self') return `${H[m.from]}+${H[1 - m.from]}`;
@@ -131,5 +135,6 @@ export function describeRules(r: Rules) {
   const parts = ['Custom', r.overflow === 'cutoff' ? 'Cutoff' : 'Rollover'];
   if (!r.splits) parts.push('No splits');
   if (r.selfTap) parts.push('Self-taps');
+  if (r.swap) parts.push('Swaps');
   return parts.join(' · ');
 }

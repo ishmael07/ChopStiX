@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUpDown, BarChart3, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Crown, Flag, Lightbulb, Pause, Play, Plus, RotateCcw, X } from 'lucide-react';
 import { Table, type ViewMode } from './Table';
 import { Avatar, clockLabel, Modal } from './ui';
-import { applyMove, describeRules, initialState, legalMoves, other, positionKey, winner, type Move, type Rules, type Side, type State } from '../game/rules';
+import { applyMove, describeRules, initialState, isSwap, legalMoves, other, positionKey, winner, type Move, type Rules, type Side, type State } from '../game/rules';
 import { evalBar, rankedMoves } from '../game/solver';
 import { botMove, type Bot } from '../game/bots';
 import { GRADE_META, reviewGame, type Grade } from '../game/review';
@@ -65,6 +65,13 @@ const darken = (hex: string) => {
   const n = parseInt(hex.slice(1), 16);
   const f = (sh: number) => Math.round(((n >> sh) & 255) * 0.55 + 0x24 * 0.45).toString(16).padStart(2, '0');
   return `#${f(16)}${f(8)}${f(0)}`;
+};
+
+/** Time spent on one move, kept short: 3.2s, 14s, 1:05. */
+const fmtSpent = (ms: number) => (ms < 10000 ? `${(ms / 1000).toFixed(1)}s` : ms < 60000 ? `${Math.round(ms / 1000)}s` : fmt(ms));
+const fmtElapsed = (ms: number) => {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 
 const fmt = (ms: number) => {
@@ -154,6 +161,24 @@ export function Game({
   const startedAt = useRef(Date.now());
   const [duration, setDuration] = useState(0);
   const movesRef = useRef<Move[]>(match?.initial.moves ?? []);
+  // Time each move took, measured on this screen (moves we caught up on at once are unknown).
+  const [spent, setSpent] = useState<(number | null)[]>(() => (match?.initial.moves ?? []).map(() => null));
+  const lastPlyAt = useRef(Date.now());
+  useEffect(() => {
+    const now = Date.now();
+    const at = lastPlyAt.current;
+    lastPlyAt.current = now;
+    setSpent((sp) =>
+      moves.length === sp.length + 1 ? [...sp, now - at] : moves.length > sp.length ? [...sp, ...Array<null>(moves.length - sp.length).fill(null)] : sp.slice(0, moves.length),
+    );
+  }, [moves.length]);
+  // A quiet running total for the status line.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (result) return;
+    const id = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [result]);
   const profileRef = useRef(profile);
   profileRef.current = profile;
 
@@ -504,7 +529,8 @@ export function Game({
             {GRADE_META[review.grades[i]].icon}
           </span>
         )}
-        {moveText(moves[i])}
+        {moveText(moves[i], states[i])}
+        {spent[i] != null && <small className="mv-time">{fmtSpent(spent[i]!)}</small>}
       </button>
     ) : (
       <span />
@@ -551,6 +577,11 @@ export function Game({
         <div className="panel-top">
           <span className="chip">{describeRules(rules)}</span>
           {timeLabel && <span className="chip">{timeLabel}</span>}
+          {!result && (
+            <span className="game-time" title="Time played">
+              {fmtElapsed(Math.max(0, nowTick - startedAt.current))}
+            </span>
+          )}
           <button className="icon-btn sm" onClick={onExit} title="Leave game" aria-label="Leave game">
             <X size={16} />
           </button>
@@ -559,7 +590,7 @@ export function Game({
         {!revealed && status && (
           <div className={`status ${canAct ? 'go' : ''}`}>
             {status}
-            {moves.length > 0 && <span className="status-move">Move {Math.floor(moves.length / 2) + 1}</span>}
+
           </div>
         )}
 
@@ -718,10 +749,10 @@ export function Game({
 }
 
 const H = ['L', 'R'];
-export function moveText(m: Move) {
+export function moveText(m: Move, before?: State) {
   if (m.kind === 'attack') return `${H[m.from]} → ${H[m.to]}`;
   if (m.kind === 'self') return `${H[m.from]} → own ${H[1 - m.from]}`;
-  return `Split ${m.to[0]}·${m.to[1]}`;
+  return `${before && isSwap(before, m) ? 'Swap' : 'Split'} ${m.to[0]}·${m.to[1]}`;
 }
 
 function CountUp({ from, to }: { from: number; to: number }) {
